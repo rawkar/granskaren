@@ -1,0 +1,43 @@
+{
+  "name": "granskaren",
+  "version": "0.1.0",
+  "description": "Webbgranskning och personlig outreach för RK Kommunikation",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "bin": {
+    "granskaren": "./bin/granskaren.mjs"
+  },
+  "scripts": {
+    "granskaren": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@axe-core/playwright": "^4.13.0",
+    "better-sqlite3": "^13.0.3",
+    "cheerio": "^1.2.0",
+    "chrome-launcher": "^1.2.2",
+    "commander": "^15.0.0",
+    "dotenv": "^18.0.5",
+    "imapflow": "^2.2.5",
+    "lighthouse": "^13.5.0",
+    "nodemailer": "^10.0.14",
+    "playwright": "^1.63.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.19.1",
+    "@types/nodemailer": "^8.0.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  }
+}
