@@ -6,6 +6,8 @@ import { db } from "./db/index.js";
 import { allaProspekt, hamtaProspektViaDoman, laggTillSparr, loggaHandelse, prospektMedStatus, sattStatus } from "./db/fragor.js";
 import { importeraFil } from "./discover/import.js";
 import { rapportSokvag } from "./report/rapport.js";
+import { review } from "./email/review.js";
+import { skapaUtkast } from "./email/utkast.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
 
@@ -74,6 +76,59 @@ program
       }
     }
     logg.info(`Klart. Granskade: ${utfall.granskad}, hoppade: ${utfall.hoppad}, fel: ${utfall.fel}`);
+  });
+
+program
+  .command("draft")
+  .description("Skriver mejlutkast för granskade sajter")
+  .option("--antal <n>", "högsta antal utkast", "5")
+  .option("--doman <doman>", "bara den här domänen")
+  .option("--test-till <adress>", "skicka utkastet till den här adressen i stället för organisationens (testläge)")
+  .action(async (o: { antal: string; doman?: string; testTill?: string }) => {
+    konfig();
+    const d = db();
+    let lista;
+    if (o.doman) {
+      const dom = normaliseraDoman(o.doman);
+      const p = dom ? hamtaProspektViaDoman(d, dom) : undefined;
+      if (!p) {
+        logg.fel(`Domänen ${o.doman} finns inte i databasen.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!["granskad", "utkast", "i_granskning"].includes(p.status)) {
+        logg.fel(`${p.doman} har status ${p.status}. Granska den först med audit.`);
+        process.exitCode = 1;
+        return;
+      }
+      lista = [p];
+    } else {
+      lista = prospektMedStatus(d, "granskad", Math.max(1, Number.parseInt(o.antal, 10) || 5));
+    }
+    if (lista.length === 0) {
+      logg.info("Inga granskade sajter utan utkast.");
+      return;
+    }
+    let skapade = 0;
+    for (const p of lista) {
+      try {
+        const u = await skapaUtkast(d, p, { testTill: o.testTill });
+        if (u) skapade++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logg.fel(`${p.doman}: ${msg}`);
+        loggaHandelse(d, p.id, "fel", msg);
+      }
+    }
+    logg.info(`Klart. ${skapade} utkast skapade. Gå igenom dem med: granskaren review`);
+  });
+
+program
+  .command("review")
+  .description("Går igenom granskningskön, ett utkast i taget")
+  .action(async () => {
+    konfig();
+    await review(db());
   });
 
 program

@@ -29,11 +29,22 @@ Kör med `npm run granskaren -- <kommando>` eller, efter `npm link`, bara `grans
 | `audit --doman exempel.se [--igen]` | Granskar en viss domän. `--igen` tillåter omgranskning. |
 | `audit --utan-modell` | Hämtar och mäter men hoppar över analysen. Bra för att testa utan API-nyckel. |
 | `audit --utan-lighthouse` | Hoppar över Lighthouse. Snabbare. |
+| `draft [--antal N]` | Skriver mejlutkast för granskade sajter. Letar upp mejladress på sajten, väljer två eller tre bekräftade fynd, skriver mejlet och kör kvalitetsgrinden. |
+| `draft --doman exempel.se --test-till du@exempel.se` | Utkast för en viss sajt, adresserat till en testadress i stället för organisationens. |
+| `review` | Går igenom granskningskön, ett utkast i taget. Godkänn, redigera i din textredigerare eller kasta. |
 | `report <domän>` | Skriver ut rapporten för en sajt. |
 | `status` | Visar prospekt per status, mätpunkter och kostnad. |
 | `block <domän eller adress>` | Lägger till på spärrlistan. |
 
-Kommandona `draft`, `review`, `send`, `sync`, `followup`, `discover` och `run` tillkommer i fas 2 till 6.
+Kommandona `send`, `sync`, `followup`, `discover` och `run` tillkommer i fas 3 till 6.
+
+## Mejlutkast och kvalitetsgrind
+
+`draft` sparar utkastet i databasen och som fil i `data/utkast/<domän>.txt`. Kvalitetsgrinden kontrollerar med kod det som går (tankstreck, kolon, utropstecken, längd 120 till 180 ord, ämnesradens längd, otillåtna länkar, du-tilltal) och låter den snabba modellen kontrollera att varje påstående om sajten har stöd i ett bekräftat fynd. Utkast som stoppas får status `utkast` och syns i `review` tillsammans med orsaken. I läget `granska` hamnar alla godkända utkast i granskningskön. I läget `auto` köas utkast med säkerhet över `MIN_SAKERHET_AUTO` direkt för utskick.
+
+Prompten för mejlet ligger i `prompts/mejl.md` och prompten för påståendekontrollen i `prompts/grind.md`. Signaturen byggs från `AVSANDARE_*` i `.env`.
+
+Sajter där ingen mejladress hittas markeras `endast_formular` och får inget utkast. Verktyget fyller aldrig i formulär.
 
 ## En första körning
 
