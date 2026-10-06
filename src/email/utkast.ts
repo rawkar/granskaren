@@ -103,8 +103,8 @@ export async function skrivUtkast(
     system: lasPrompt("mejl"),
     innehall: [{ type: "text", text: `Uppgifter för mejlet i JSON:\n\n${JSON.stringify(uppgifter, null, 1)}` }],
     schema: UtkastSchema,
-    maxTokens: 3000,
-    effort: "high",
+    maxTokens: 4000,
+    effort: "medium",
   });
 }
 

@@ -15,11 +15,12 @@ export function lasPerspektiv(): string | null {
   const fil = path.join(PROMPT_DIR, "rawaz-perspektiv.md");
   if (!fs.existsSync(fil)) return null;
   const rader = fs.readFileSync(fil, "utf8").split(/\r?\n/);
-  const avsnitt: { rubrik: string; text: string[] }[] = [];
+  // Text före första avsnittet räknas som inledning
+  const avsnitt: { rubrik: string; text: string[] }[] = [{ rubrik: "Inledning", text: [] }];
   for (const rad of rader) {
     if (rad.startsWith("## ")) avsnitt.push({ rubrik: rad.slice(3).trim(), text: [] });
     else if (rad.startsWith("#") || rad.startsWith(">")) continue;
-    else if (avsnitt.length && rad.trim()) avsnitt[avsnitt.length - 1].text.push(rad.trim());
+    else if (rad.trim()) avsnitt[avsnitt.length - 1].text.push(rad.trim());
   }
   const ifyllda = avsnitt.filter((a) => a.text.length > 0);
   if (ifyllda.length === 0) return null;

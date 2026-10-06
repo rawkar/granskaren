@@ -25,7 +25,8 @@ Beröm används bara om det är specifikt och hänger ihop med huvudinsikten. Al
 - Skriv som en erfaren kollega som har tittat på sajten, inte som en granskare som delar ut betyg. Inga nedlåtande formuleringar om mottagarens sajt.
 - Inga facktermer utan förklaring. Skriv "beskrivningen som syns i Googles sökresultat" hellre än "metabeskrivning", "den stora bilden högst upp" hellre än "hero", "hur snabbt sidan laddar i mobilen" hellre än "LCP".
 - Ren text utan formatering, punktlistor, bilder eller spårning. Enda länken är rkkommunikation.se och eventuell bokningslänk. Skriv webbadresser utan https://.
-- Brödtexten är 150 till 220 ord, exemplet inräknat.
+- Brödtexten är 150 till 220 ord, exemplet inräknat. Sikta på 160 till 200 ord så att det finns marginal. Räkna orden innan du svarar.
+- Citat från sajten som innehåller du eller dig återges inte ordagrant, skriv om dem så att mejlet håller ni-tilltalet.
 - Ämnesraden är högst 50 tecken, innehåller organisationens namn eller sajt och är inte skriven med versaler.
 - Inledningen ska stämma med hur granskningen gjordes. Du får uppgift om vilken formulering som gäller: antingen att Rawaz har tittat på webbplatsen, eller att han har gått igenom den med sina granskningsverktyg. Använd den angivna varianten med egna ord.
 - Siffror får bara förekomma om de står i fynden. Avrunda gärna i ord, till exempel "nio fält" eller "drygt sex sekunder".
