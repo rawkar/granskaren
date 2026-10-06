@@ -8,6 +8,7 @@ import { importeraFil } from "./discover/import.js";
 import { rapportSokvag } from "./report/rapport.js";
 import { review } from "./email/review.js";
 import { skapaUtkast } from "./email/utkast.js";
+import { skickaKoade, skickaTest } from "./email/skicka.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
 
@@ -129,6 +130,41 @@ program
   .action(async () => {
     konfig();
     await review(db());
+  });
+
+program
+  .command("send")
+  .description("Skickar köade mejl inom tidsfönster och dagligt tak. Vid TORRKORNING=true skrivs filer i data/torrkorning/")
+  .option("--max <n>", "högsta antal att skicka i den här körningen")
+  .option("--test-till <adress>", "skicka ett utkast som test till den här adressen, utan att röra kön eller torrkörningen")
+  .option("--doman <doman>", "vilket utkast som ska testskickas (annars det senaste i kön)")
+  .action(async (o: { max?: string; testTill?: string; doman?: string }) => {
+    konfig();
+    const d = db();
+    if (o.testTill) {
+      let rad: { id: number } | undefined;
+      if (o.doman) {
+        const dom = normaliseraDoman(o.doman);
+        const p = dom ? hamtaProspektViaDoman(d, dom) : undefined;
+        if (!p) {
+          logg.fel(`Domänen ${o.doman} finns inte i databasen.`);
+          process.exitCode = 1;
+          return;
+        }
+        rad = d.prepare("SELECT id FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' ORDER BY id DESC LIMIT 1").get(p.id) as { id: number } | undefined;
+      } else {
+        rad = d.prepare("SELECT id FROM mejl WHERE status IN ('koad', 'i_granskning', 'utkast') ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+      }
+      if (!rad) {
+        logg.fel("Inget utkast att testskicka. Kör draft först.");
+        process.exitCode = 1;
+        return;
+      }
+      await skickaTest(d, rad.id, o.testTill);
+      return;
+    }
+    const r = await skickaKoade(d, { max: o.max ? Number.parseInt(o.max, 10) : undefined });
+    logg.info(`Klart. Skickade: ${r.skickade}, torrkörda: ${r.torrkorda}, stoppade: ${r.stoppade}`);
   });
 
 program
