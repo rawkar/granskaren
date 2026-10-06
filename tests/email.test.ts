@@ -142,6 +142,8 @@ Vänliga hälsningar`;
     expect(sprakfel("Hej exempel.se", ok.replace("er webbplats", "din webbplats och dina sidor"), "", "ni")).toContain("tilltalar med du i stället för ni");
     expect(sprakfel("Hej exempel.se", ok.replace("er webbplats", "din webbplats och dina sidor"), "")).not.toContain("tilltalar med du i stället för ni");
     expect(sprakfel("Hej exempel.se", ok, "", "du")).toContain("tilltalar med ni i stället för du");
+    const duText = ok.replace(/\b(ni|er|era)\b/gi, "du").replace("Hej,", "Hej Anna,").replace("byrå som gör", "byrå med vana från reklambyråer som gör");
+    expect(sprakfel("Hej exempel.se", duText, "", "du")).not.toContain("tilltalar med ni i stället för du");
     expect(sprakfel("Hej exempel.se", ok, "", "du")).toContain("hälsar inte med förnamn");
     expect(sprakfel("Hej exempel.se", ok.replace("Era sex kundcase", "Era sex kundcase har rubriker som kunde stå var som helst och"), "")).toContainEqual(expect.stringMatching(/kritiserar mottagarens formulering/));
     expect(sprakfel("Hej exempel.se", ok.replace("Era sex kundcase", "- Era sex kundcase"), "")).toContain("innehåller punktlista");

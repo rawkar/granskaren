@@ -75,8 +75,10 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string, t
     if (!ok && !/^[a-z0-9-]+\.(se|nu|com|org|net)$/.test(ren)) fel.push(`otillåten länk: ${l}`);
   }
   if (!/rkkommunikation\.se/i.test(brodtext)) fel.push("hänvisning till rkkommunikation.se saknas");
-  if (tilltal === "ni" && /\b(du|dig|din|ditt|dina)\b/i.test(egenText)) fel.push("tilltalar med du i stället för ni");
-  if (tilltal === "du" && /\b(ni|er|era|ert)\b/i.test(egenText.replace(/\bHej\b/g, ""))) fel.push("tilltalar med ni i stället för du");
+  // Egna ordgränser: \b i JavaScript känner inte å, ä och ö, så "reklambyråer" skulle annars matcha "er"
+  const ordgrans = (lista: string) => new RegExp(`(?<![a-zåäö])(${lista})(?![a-zåäö])`, "i");
+  if (tilltal === "ni" && ordgrans("du|dig|din|ditt|dina").test(egenText)) fel.push("tilltalar med du i stället för ni");
+  if (tilltal === "du" && ordgrans("ni|er|era|ert").test(egenText)) fel.push("tilltalar med ni i stället för du");
   if (tilltal === "du" && !/^Hej [A-ZÅÄÖ][a-zåäöé-]+,/m.test(brodtext)) fel.push("hälsar inte med förnamn");
   if (/\bAI\b|språkmodell|artificiell/i.test(brodtext)) fel.push("nämner AI");
   if (/mätning saknas|statistik saknas|saknar\b[^.]{0,30}\b(mätning|statistik)|ingen mätning|ingen statistik|utan mätning/i.test(brodtext)) {
