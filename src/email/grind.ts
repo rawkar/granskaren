@@ -41,9 +41,15 @@ const OMDOMEN = /som helst|intetsägande|allmän(t|na)? (rad|rubrik|formulering|
  * Språkregler som går att kontrollera med kod. Returnerar en lista med fel.
  * tilltal styr om du eller ni är det tillåtna tilltalet. Utelämnas det hoppas kontrollen över.
  */
-export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal): string[] {
+export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal, undantagsrader: string[] = []): string[] {
   const fel: string[] = [];
   const hela = `${amne}\n${brodtext}`;
+  // Det konkreta förslaget är text för sajten, inte för mottagaren, och undantas från tilltals- och omdömeskontrollen
+  const undantag = new Set(undantagsrader.map((r) => normaliseraText(r)));
+  const egenText = brodtext
+    .split(/\r?\n/)
+    .filter((r) => !undantag.has(normaliseraText(r)))
+    .join("\n");
   if (/[–—]/.test(hela)) fel.push("innehåller tankstreck");
   if (/ - /.test(hela)) fel.push("innehåller bindestreck använt som tankstreck");
   if (/:/.test(amne)) fel.push("ämnesraden innehåller kolon");
@@ -69,14 +75,14 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string, t
     if (!ok && !/^[a-z0-9-]+\.(se|nu|com|org|net)$/.test(ren)) fel.push(`otillåten länk: ${l}`);
   }
   if (!/rkkommunikation\.se/i.test(brodtext)) fel.push("hänvisning till rkkommunikation.se saknas");
-  if (tilltal === "ni" && /\b(du|dig|din|ditt|dina)\b/i.test(brodtext)) fel.push("tilltalar med du i stället för ni");
-  if (tilltal === "du" && /\b(ni|er|era|ert)\b/i.test(brodtext.replace(/\bHej\b/g, ""))) fel.push("tilltalar med ni i stället för du");
+  if (tilltal === "ni" && /\b(du|dig|din|ditt|dina)\b/i.test(egenText)) fel.push("tilltalar med du i stället för ni");
+  if (tilltal === "du" && /\b(ni|er|era|ert)\b/i.test(egenText.replace(/\bHej\b/g, ""))) fel.push("tilltalar med ni i stället för du");
   if (tilltal === "du" && !/^Hej [A-ZÅÄÖ][a-zåäöé-]+,/m.test(brodtext)) fel.push("hälsar inte med förnamn");
   if (/\bAI\b|språkmodell|artificiell/i.test(brodtext)) fel.push("nämner AI");
   if (/mätning saknas|statistik saknas|saknar\b[^.]{0,30}\b(mätning|statistik)|ingen mätning|ingen statistik|utan mätning/i.test(brodtext)) {
     fel.push("påstår att mätning saknas, ska vara att inget mätverktyg syns");
   }
-  const omdome = brodtext.match(OMDOMEN);
+  const omdome = egenText.match(OMDOMEN);
   if (omdome) fel.push(`kritiserar mottagarens formulering ("${omdome[0]}")`);
   return fel;
 }
@@ -121,7 +127,7 @@ export async function kvalitetsgrind(
   const fel: string[] = [];
   const varningar: string[] = [];
 
-  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal));
+  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x)));
   fel.push(...tillaggsfel(utkast.brodtext, fynd));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);

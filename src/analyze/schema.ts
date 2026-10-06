@@ -100,6 +100,21 @@ export const VerifieringSchema = z.object({
 });
 export type Verifiering = z.infer<typeof VerifieringSchema>;
 
+/**
+ * Det konkreta förslaget ska vara ren text på en rad: tar bort etiketter som "Huvudrubrik:",
+ * omgivande citattecken och en avslutande förklaring efter punkt om förslaget är en rubrik.
+ */
+export function stadaForslag(s: string | null | undefined): string | null {
+  if (!s) return null;
+  let t = s.trim().split(/\r?\n/)[0].trim();
+  t = t.replace(/^(huvudrubrik|rubrik|sidtitel|titel|knapp|knapptext|exempel|f[öo]rslag|ingress|f[öo]rsta mening(en)?)\s*:\s*/i, "");
+  t = t.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
+  // "X. Under rubriken en länk: Y" -> behåll bara X när resten är en förklaring med kolon
+  const delar = t.split(/\.\s+(?=[A-ZÅÄÖ])/);
+  if (delar.length > 1 && /:/.test(delar.slice(1).join(" "))) t = delar[0];
+  return t.replace(/\.$/, "").trim() || null;
+}
+
 /** Begränsar numeriska fält till tillåtna intervall efter att modellen svarat. */
 export function stadaFynd(f: Fynd): Fynd {
   const heltal = (v: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(v)));
@@ -109,7 +124,7 @@ export function stadaFynd(f: Fynd): Fynd {
     latt_att_forklara: heltal(f.latt_att_forklara, 1, 3),
     djup: heltal(f.djup, 1, 3),
     sakerhet: Math.min(1, Math.max(0, f.sakerhet)),
-    forslag_konkret: f.forslag_konkret?.trim() || null,
+    forslag_konkret: stadaForslag(f.forslag_konkret),
     rotorsak: f.rotorsak?.trim() || null,
   };
 }

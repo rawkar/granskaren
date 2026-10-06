@@ -48,7 +48,7 @@ Frågor att ställa, i den här andan:
 - djup. 1 betyder att ett verktyg hittar det (sidtiteln börjar med Start). 2 kräver tolkning av mätdata (startsidan laddar långsamt på grund av fyra okomprimerade bilder i bildspelet). 3 kräver omdöme om kommunikationen (casen visar vad som gjordes men aldrig vad kunden fick ut av det). Minst två fynd ska ha djup 3 om underlaget medger det.
 - insikt. Varför detta spelar roll för just den här organisationens syfte, en eller två meningar.
 - rotorsak. Vad som sannolikt ligger bakom, om det går att säga, annars null.
-- forslag_konkret. Ett färdigt exempel i form av text, till exempel en ny huvudrubrik, en ny sidtitel eller en omskriven första mening. Minst ett fynd per sajt ska ha ett sådant förslag. Förslaget får bara bygga på fakta ur profilen med hög säkerhet, inga påhittade tjänster, orter eller siffror. Övriga fynd har null.
+- forslag_konkret. Ett färdigt exempel i form av text, till exempel en ny huvudrubrik, en ny sidtitel eller en ny knapptext. Fältet innehåller bara själva texten, exakt som den skulle stå på sajten, på en rad, utan etikett som "Huvudrubrik:", utan kolon och utan förklaring. Förklaringen hör hemma i atgard. Minst ett fynd per sajt ska ha ett sådant förslag. Förslaget får bara bygga på fakta ur profilen med hög säkerhet, inga påhittade tjänster, orter eller siffror. Övriga fynd har null.
 - insats. liten, medel eller stor. Hur mycket arbete åtgärden kräver.
 - kopplar_till_syfte. true om fyndet påverkar sajtens huvudsyfte.
 - allvar 1 till 3, sakerhet 0 till 1, latt_att_forklara 1 till 3 som tidigare.

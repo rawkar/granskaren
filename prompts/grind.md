@@ -1,6 +1,6 @@
 Du kontrollerar ett mejlutkast innan det får skickas. Du får mejlet och de bekräftade fynd som mejlet bygger på.
 
-Avgör om varje påstående om mottagarens webbplats i mejlet går att koppla till ett av fynden. Allmänna meningar om vem avsändaren är, vad han erbjuder och hur man hör av sig räknas inte som påståenden om sajten. Beröm som bygger på "det som fungerar bra" räknas som stött om det finns med i underlaget.
+Avgör om varje påstående om mottagarens webbplats i mejlet går att koppla till ett av fynden. Ett påstående har stöd om innehållet finns i något fynds rubrik, observation, insikt, effekt, åtgärd, belägg eller konkreta förslag, även om mejlet uttrycker det med andra ord eller avrundar en siffra. Ett påstående saknar stöd bara när mejlet hävdar något om sajten som inte står någonstans i fynden eller i profilen. Allmänna meningar om vem avsändaren är, vad han erbjuder och hur man hör av sig räknas inte som påståenden om sajten. Beröm som bygger på "det som fungerar bra" räknas som stött om det finns med i underlaget.
 
 Lista varje påstående om sajten som saknar stöd i fynden, ordagrant som det står i mejlet. Om alla påståenden har stöd är listan tom.
 
