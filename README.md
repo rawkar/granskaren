@@ -52,6 +52,10 @@ Filen `prompts/rawaz-perspektiv.md` är din. Fyll i den med dina principer och v
 
 ## Mejlutkast och kvalitetsgrind
 
+Ämnesraden skrivs inte av modellen utan från mallen `AMNESMALL` i `.env`, där `{domän}` byts mot domänen utan www och `{namn}` mot organisationens namn. Blir raden längre än 60 tecken används namnet i stället för domänen.
+
+Tilltalet avgörs i profilen. Drivs sajten av en namngiven person (jagform, personnamn i rubrik eller kontakt) hälsar mejlet med förnamn och säger du, annars ni. En enskild konsult kallas aldrig byrå. Mejlet kritiserar aldrig mottagarens formuleringar utan lyfter det som redan är starkt och föreslår en mer framträdande plats, och varje stycke om ett fynd slutar med vad mottagaren vinner eller ett förslag.
+
 Mejlet byggs kring huvudinsikten med två eller tre fynd som stöder den. Minst ett fynd har djup 3, högst ett har djup 1, och minst ett har ett konkret förslag. Brödtexten är 150 till 220 ord. Saknas huvudinsikt eller fynd med djup 3 skrivs inget mejl, och sajten läggs i granskningskön tillsammans med rapporten så att du kan avgöra själv. Om mätning skriver mejlet alltid att inget mätverktyg syns på sidan, aldrig att mätning saknas.
 
 `draft` sparar utkastet i databasen och som fil i `data/utkast/<domän>.txt`. Kvalitetsgrinden kontrollerar med kod det som går (tankstreck, kolon, utropstecken, längd, ämnesradens längd, otillåtna länkar, du-tilltal, fyndens djup, att det konkreta förslaget står på en egen rad och att varje siffra i mejlet finns i fynden) och låter den snabba modellen kontrollera att varje påstående om sajten har stöd i ett bekräftat fynd. Utkast som stoppas får status `utkast` och syns i `review` tillsammans med orsaken. I läget `granska` hamnar alla godkända utkast i granskningskön. I läget `auto` köas utkast med säkerhet över `MIN_SAKERHET_AUTO` direkt för utskick.

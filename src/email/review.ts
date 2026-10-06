@@ -8,7 +8,7 @@ import { fyndForProspekt, hamtaProspekt, loggaHandelse, sattStatus } from "../db
 import { rapportSokvag } from "../report/rapport.js";
 import { sprakfel, antalOrd } from "./grind.js";
 import { konfig } from "../config.js";
-import { AVSLUTSRAD, signatur } from "./utkast.js";
+import { avslutsrad, signatur } from "./utkast.js";
 
 interface MejlRad {
   id: number;
@@ -96,7 +96,7 @@ export async function review(d: Db): Promise<void> {
           const fel = sprakfel(nytt.amne, nytt.brodtext, konfig().BOKNINGSLANK);
           if (fel.length) console.log(`Observera, språkregler: ${fel.join("; ")} (${antalOrd(nytt.brodtext)} ord)`);
           m.amne = nytt.amne;
-          m.text = `${nytt.brodtext.trim()}\n${signatur()}\n\n${AVSLUTSRAD}\n`;
+          m.text = `${nytt.brodtext.trim()}\n${signatur()}\n\n${avslutsrad(/^Hej [A-ZÅÄÖ]/m.test(nytt.brodtext) ? "du" : "ni")}\n`;
           d.prepare("UPDATE mejl SET amne = ?, text = ? WHERE id = ?").run(m.amne, m.text, m.id);
           loggaHandelse(d, p.id, "redigerat_i_review");
           console.log(`\nÄmne: ${m.amne}\n\n${m.text}`);

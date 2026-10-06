@@ -51,6 +51,7 @@ export function skrivRapport(d: Db, prospektId: number, u: Underlag, sammanfattn
   if (profil) {
     r.push("## Profil");
     r.push("");
+    if (profil.person) r.push(`- **Namngiven person.** ${profil.person.drivs_av_namngiven_person ? `ja, ${profil.person.fornamn ?? "förnamn saknas"} (tilltal du)` : "nej (tilltal ni)"} [säkerhet ${profil.person.sakerhet.toFixed(2)}]${profil.person.belagg ? ` Belägg: "${profil.person.belagg}"` : ""}`);
     for (const [nyckel, rubrik] of Object.entries(PROFILRUBRIKER)) {
       const punkt = (profil as unknown as Record<string, { varde: string; sakerhet: number; belagg: string | null; gissning: boolean }>)[nyckel];
       if (!punkt) continue;

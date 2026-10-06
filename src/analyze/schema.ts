@@ -56,7 +56,15 @@ const ProfilPunkt = z.object({
   gissning: z.boolean(),
 });
 
+export const PersonSchema = z.object({
+  drivs_av_namngiven_person: z.boolean(),
+  fornamn: z.string().nullable(),
+  sakerhet: z.number(),
+  belagg: z.string().nullable(),
+});
+
 export const ProfilSchema = z.object({
+  person: PersonSchema,
   vad_de_gor: ProfilPunkt,
   for_vem: ProfilPunkt,
   omrade: ProfilPunkt,

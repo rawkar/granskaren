@@ -17,12 +17,11 @@ import {
 import { rapportSokvag } from "../report/rapport.js";
 import { dataMapp, filnamnSaker } from "../util/fil.js";
 import { logg } from "../util/logg.js";
-import { kvalitetsgrind, type Grindresultat } from "./grind.js";
+import { byggAmne, kvalitetsgrind, type Grindresultat, type Tilltal } from "./grind.js";
 import { bastaKontakt, sparaKontakter, utvinnKontakter } from "./kontakter.js";
 import { valjFynd } from "./val.js";
 
 const UtkastSchema = z.object({
-  amne: z.string(),
   brodtext: z.string(),
 });
 
@@ -43,10 +42,23 @@ export function signatur(): string {
   return rader.join("\n");
 }
 
-export const AVSLUTSRAD = "Vill ni inte att jag hör av mig igen räcker det att ni svarar det.";
+export function avslutsrad(tilltal: Tilltal): string {
+  return tilltal === "du"
+    ? "Vill du inte att jag hör av mig igen räcker det att du svarar det."
+    : "Vill ni inte att jag hör av mig igen räcker det att ni svarar det.";
+}
 
-export function sattIhop(brodtext: string): string {
-  return `${brodtext.trim()}\n${signatur()}\n\n${AVSLUTSRAD}\n`;
+export function sattIhop(brodtext: string, tilltal: Tilltal = "ni"): string {
+  return `${brodtext.trim()}\n${signatur()}\n\n${avslutsrad(tilltal)}\n`;
+}
+
+/** Tilltal och förnamn utifrån profilen. Du bara när personen är namngiven med rimlig säkerhet. */
+export function tilltalFor(profil: Profil | null): { tilltal: Tilltal; fornamn: string | null } {
+  const p = profil?.person;
+  if (p && p.drivs_av_namngiven_person && p.fornamn && p.sakerhet >= 0.7) {
+    return { tilltal: "du", fornamn: p.fornamn.trim().split(/\s+/)[0] };
+  }
+  return { tilltal: "ni", fornamn: null };
 }
 
 /** Profilpunkter med hög säkerhet och utan gissning, det enda som får bli påståenden i mejlet. */
@@ -54,22 +66,23 @@ function sakraProfilpunkter(profil: Profil | null): Record<string, string> {
   if (!profil) return {};
   const ut: Record<string, string> = {};
   for (const [k, v] of Object.entries(profil)) {
-    if (k === "borja_med") continue;
+    if (k === "borja_med" || k === "person") continue;
     const p = v as { varde: string; sakerhet: number; gissning: boolean };
-    if (p && !p.gissning && p.sakerhet >= 0.7) ut[k] = p.varde;
+    if (p && typeof p.varde === "string" && !p.gissning && p.sakerhet >= 0.7) ut[k] = p.varde;
   }
   return ut;
 }
 
-/** Skriver ett mejlutkast med modellen kring huvudinsikten och de valda fynden. */
+/** Skriver brödtexten med modellen kring huvudinsikten och de valda fynden. */
 export async function skrivUtkast(
   d: Db,
   p: Prospekt,
   fynd: FyndRad[],
   huvudinsikt: Huvudinsikt,
   profil: Profil | null,
+  tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
-): Promise<{ amne: string; brodtext: string }> {
+): Promise<{ brodtext: string }> {
   const k = konfig();
   const inledning =
     k.SANDLAGE === "auto"
@@ -77,6 +90,8 @@ export async function skrivUtkast(
       : "Rawaz läser utkastet innan det skickas. Inledningen får säga att han har tittat på webbplatsen.";
   const uppgifter = {
     organisation: { namn: p.namn, doman: p.doman, organisationstyp: p.organisationstyp, bransch: p.bransch, ort: p.ort },
+    tilltal: tilltal.tilltal,
+    fornamn: tilltal.fornamn,
     profil: sakraProfilpunkter(profil),
     huvudinsikt: huvudinsikt.text,
     avsandare: { namn: k.AVSANDARE_NAMN, sajt: "rkkommunikation.se", bokningslank: k.BOKNINGSLANK || null },
@@ -116,12 +131,12 @@ export interface DraftAlternativ {
 /** Hela utkaststeget för ett granskat prospekt: kontakter, val av fynd, utkast, kvalitetsgrind, sparande. */
 export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): Promise<Utkast | null> {
   logg.info(`Utkast för ${p.doman} (#${p.id})`);
+  const k = konfig();
   const fynd = fyndForProspekt(d, p.id, true);
   const huvudinsikt = p.huvudinsikt ? (JSON.parse(p.huvudinsikt) as Huvudinsikt) : null;
   const profil = p.profil ? (JSON.parse(p.profil) as Profil) : null;
   const val = valjFynd(fynd, huvudinsikt);
   if (val.orsak) {
-    // Inget mejl. Sajten läggs i granskningskön med rapporten så att Rawaz kan avgöra själv.
     logg.info(`   inget mejl: ${val.orsak}. Läggs i granskningskön med rapporten.`);
     loggaHandelse(d, p.id, "utkast_hoppat", val.orsak);
     sattStatus(d, p.id, "i_granskning");
@@ -149,35 +164,38 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
     d.prepare("UPDATE prospekt SET orsak_hoppad = 'endast_formular' WHERE id = ?").run(p.id);
     return null;
   }
+  const tilltal = tilltalFor(profil);
+  const amne = byggAmne(k.AMNESMALL, p.doman, p.namn);
   logg.info(`   mottagare: ${mottagare}${alt.testTill ? " (testläge)" : ` (${kontakt?.typ}, från ${kontakt?.kallsida})`}`);
+  logg.info(`   tilltal: ${tilltal.tilltal}${tilltal.fornamn ? ` (${tilltal.fornamn})` : ""}, ämne: ${amne}`);
   logg.info(`   huvudinsikt: ${huvudinsikt!.text}`);
   logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} djup ${f.djup}`).join(", ")}`);
 
-  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt!.text, profil: JSON.stringify(sakraProfilpunkter(profil)) };
+  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt!.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal };
   const forsok = alt.forsok ?? 2;
-  let utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil);
-  let grind = await kvalitetsgrind(d, p, utkast, valda, bra, mottagare, grindAlt);
+  let utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal);
+  let grind = await kvalitetsgrind(d, p, { amne, brodtext: utkast.brodtext }, valda, bra, mottagare, grindAlt);
   for (let i = 1; i < forsok && !grind.godkand; i++) {
     logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
-    utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, grind.fel);
-    grind = await kvalitetsgrind(d, p, utkast, valda, bra, mottagare, grindAlt);
+    utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal, grind.fel);
+    grind = await kvalitetsgrind(d, p, { amne, brodtext: utkast.brodtext }, valda, bra, mottagare, grindAlt);
   }
 
-  const text = sattIhop(utkast.brodtext);
+  const text = sattIhop(utkast.brodtext, tilltal.tilltal);
   const status = grind.utfall === "stoppad" ? "utkast" : grind.utfall;
   d.prepare("DELETE FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status IN ('utkast', 'i_granskning')").run(p.id);
   d.prepare(
     "INSERT INTO mejl (prospekt_id, typ, mottagare, amne, text, anvanda_fynd, sakerhet, status) VALUES (?, 'forsta', ?, ?, ?, ?, ?, ?)",
-  ).run(p.id, mottagare, utkast.amne, text, JSON.stringify(valda.map((f) => f.fynd_id)), grind.sakerhet, status);
+  ).run(p.id, mottagare, amne, text, JSON.stringify(valda.map((f) => f.fynd_id)), grind.sakerhet, status);
   sattStatus(d, p.id, status === "utkast" ? "utkast" : status);
-  loggaHandelse(d, p.id, "utkast_skapat", { status, fel: grind.fel, varningar: grind.varningar, sakerhet: grind.sakerhet });
+  loggaHandelse(d, p.id, "utkast_skapat", { status, fel: grind.fel, varningar: grind.varningar, sakerhet: grind.sakerhet, tilltal: tilltal.tilltal });
 
   const fil = path.join(dataMapp("utkast"), `${filnamnSaker(p.doman)}.txt`);
-  fs.writeFileSync(fil, `Till: ${mottagare}\nÄmne: ${utkast.amne}\n\n${text}`, "utf8");
+  fs.writeFileSync(fil, `Till: ${mottagare}\nÄmne: ${amne}\n\n${text}`, "utf8");
   logg.info(`   ${grind.godkand ? "godkänt av grinden" : `STOPPAT: ${grind.fel.join("; ")}`} -> status ${status}. Fil: ${fil}`);
   if (grind.varningar.length) logg.varning(`   ${grind.varningar.join("; ")}`);
 
-  return { amne: utkast.amne, brodtext: utkast.brodtext, text, mottagare, fynd: valda, grind };
+  return { amne, brodtext: utkast.brodtext, text, mottagare, fynd: valda, grind };
 }
 
 export function rapportFor(p: Prospekt): string {

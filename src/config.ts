@@ -46,6 +46,8 @@ const schema = z.object({
   AVSANDARE_TELEFON: z.string().optional().default(""),
   AVSANDARE_SAJT: z.string().optional().default("https://rkkommunikation.se"),
   BOKNINGSLANK: z.string().optional().default(""),
+  /** Ämnesrad. {domän} byts mot domänen utan www, {namn} mot organisationens namn. Över 60 tecken används namnet. */
+  AMNESMALL: z.string().optional().default("Några förslag för {domän}"),
 
   SANDLAGE: z.enum(["granska", "auto"]).optional().default("granska"),
   TORRKORNING: bool,

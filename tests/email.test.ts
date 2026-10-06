@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { avkoda, hittaAdresser, utvinnKontakter } from "../src/email/kontakter.js";
 import { valjFynd } from "../src/email/val.js";
-import { antalOrd, sprakfel, tillaggsfel } from "../src/email/grind.js";
+import { antalOrd, byggAmne, sprakfel, tillaggsfel } from "../src/email/grind.js";
 import type { FyndRad } from "../src/db/fragor.js";
 
 describe("adressutvinning", () => {
@@ -123,7 +123,7 @@ Vänliga hälsningar`;
     expect(sprakfel("Hej exempel.se", `${ok}\nTack!`, "")).toContain("innehåller utropstecken");
     expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "")[0]).toMatch(/ord, ska vara 150 till 220/);
     expect(sprakfel("En alldeles för lång ämnesrad som går långt över femtio tecken exempel.se", ok, "")).toContain(
-      "ämnesraden är 73 tecken, högst 50",
+      "ämnesraden är 73 tecken, högst 60",
     );
     expect(sprakfel("TRE SAKER PÅ EXEMPEL.SE", ok, "")).toContain("ämnesraden är skriven med versaler");
   });
@@ -131,7 +131,11 @@ Vänliga hälsningar`;
     expect(sprakfel("Hej exempel.se", ok.replace("rkkommunikation.se", "rkkommunikation.se och https://annan.se/sida"), "")).toContain(
       "otillåten länk: https://annan.se/sida",
     );
-    expect(sprakfel("Hej exempel.se", ok.replace("er webbplats", "din webbplats och dina sidor"), "")).toContain("tilltalar med du i stället för ni");
+    expect(sprakfel("Hej exempel.se", ok.replace("er webbplats", "din webbplats och dina sidor"), "", "ni")).toContain("tilltalar med du i stället för ni");
+    expect(sprakfel("Hej exempel.se", ok.replace("er webbplats", "din webbplats och dina sidor"), "")).not.toContain("tilltalar med du i stället för ni");
+    expect(sprakfel("Hej exempel.se", ok, "", "du")).toContain("tilltalar med ni i stället för du");
+    expect(sprakfel("Hej exempel.se", ok, "", "du")).toContain("hälsar inte med förnamn");
+    expect(sprakfel("Hej exempel.se", ok.replace("Era sex kundcase", "Era sex kundcase har rubriker som kunde stå var som helst och"), "")).toContainEqual(expect.stringMatching(/kritiserar mottagarens formulering/));
     expect(sprakfel("Hej exempel.se", ok.replace("Era sex kundcase", "- Era sex kundcase"), "")).toContain("innehåller punktlista");
     expect(sprakfel("Hej exempel.se", ok.replace("Jag har gått igenom", "Med hjälp av AI har jag gått igenom"), "")).toContain("nämner AI");
     expect(sprakfel("Hej exempel.se", ok.replace("Samma sak syns i sök.", "Dessutom saknar sajten mätning."), "")).toContain(
@@ -152,5 +156,15 @@ Vänliga hälsningar`;
     expect(tillaggsfel(ok.replace("nio fält", "12 fält"), fyndOk)).toContain("siffran 12 finns inte i fynden");
     expect(tillaggsfel(ok.replace("nio fält", "9 fält"), fyndOk)).toEqual([]);
     expect(tillaggsfel(ok, [...fyndOk, fynd({ fynd_id: "x", djup: 1 })])).toContain("fler än ett fynd med djup 1");
+  });
+});
+
+describe("ämnesrad från mall", () => {
+  it("fyller i domänen utan www och byter till namnet över 60 tecken", () => {
+    expect(byggAmne("Några förslag för {domän}", "www.exempel.se", "Exempel AB")).toBe("Några förslag för exempel.se");
+    expect(byggAmne("Några förslag för {domän}", "https://exempel.se/", null)).toBe("Några förslag för exempel.se");
+    const lang = "en-valdigt-lang-domän-som-foreningen-har-registrerat-for-sig.se";
+    expect(byggAmne("Några förslag för {domän}", lang, "Föreningen")).toBe("Några förslag för Föreningen");
+    expect(byggAmne("Tre idéer till {namn}", "exempel.se", null)).toBe("Tre idéer till exempel.se");
   });
 });

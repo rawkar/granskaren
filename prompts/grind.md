@@ -4,4 +4,4 @@ Avgör om varje påstående om mottagarens webbplats i mejlet går att koppla ti
 
 Lista varje påstående om sajten som saknar stöd i fynden, ordagrant som det står i mejlet. Om alla påståenden har stöd är listan tom.
 
-Notera också om mejlet innehåller siffror eller mätvärden som inte står i fynden, och om tonen bryter mot reglerna (nedlåtande, säljig, retoriska frågor, utropstecken, uppräkningar i tre led).
+Notera också om mejlet innehåller siffror eller mätvärden som inte står i fynden, och om tonen bryter mot reglerna: nedlåtande, säljig, retoriska frågor, utropstecken, uppräkningar i tre led, omdömen om mottagarens formuleringar (allmän, intetsägande, slogan, kunde stå var som helst), ordet byrå om en enskild person, eller ett stycke om ett fynd som slutar i ett konstaterande i stället för vad mottagaren vinner eller ett förslag. Lista varje sådant problem under tonproblem med det ordagranna stället.

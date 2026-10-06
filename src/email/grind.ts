@@ -14,16 +14,34 @@ export interface Grindresultat {
   utfall: "koad" | "i_granskning" | "stoppad";
 }
 
+export type Tilltal = "du" | "ni";
+
 export const MIN_ORD = 150;
 export const MAX_ORD = 220;
+export const MAX_AMNE = 60;
 
 /** Räknar ord i brödtexten (före signatur). */
 export function antalOrd(text: string): number {
   return text.split(/\s+/).filter((w) => /[a-zåäö0-9]/i.test(w)).length;
 }
 
-/** Språkregler som går att kontrollera med kod. Returnerar en lista med fel. */
-export function sprakfel(amne: string, brodtext: string, bokningslank: string): string[] {
+/** Bygger ämnesraden från mallen i .env. Över 60 tecken används organisationens namn i stället för domänen. */
+export function byggAmne(mall: string, doman: string, namn: string | null): string {
+  const ren = doman.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+  const fyll = (s: string, d: string) => s.replace(/\{dom[aä]n\}/gi, d).replace(/\{namn\}/gi, namn ?? d).trim();
+  let amne = fyll(mall, ren);
+  if (amne.length > MAX_AMNE && namn) amne = fyll(mall.replace(/\{dom[aä]n\}/gi, "{namn}"), ren);
+  return amne;
+}
+
+/** Omdömen om mottagarens formuleringar som aldrig får förekomma. */
+const OMDOMEN = /som helst|intetsägande|allmän(t|na)? (rad|rubrik|formulering|slogan)|bara en slogan|säger (inget|ingenting)|klyscha|tom fras/i;
+
+/**
+ * Språkregler som går att kontrollera med kod. Returnerar en lista med fel.
+ * tilltal styr om du eller ni är det tillåtna tilltalet. Utelämnas det hoppas kontrollen över.
+ */
+export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal): string[] {
   const fel: string[] = [];
   const hela = `${amne}\n${brodtext}`;
   if (/[–—]/.test(hela)) fel.push("innehåller tankstreck");
@@ -37,7 +55,7 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string): 
   if (/[*_#>`]/.test(brodtext)) fel.push("innehåller formateringstecken");
   const ord = antalOrd(brodtext);
   if (ord < MIN_ORD || ord > MAX_ORD) fel.push(`brödtexten är ${ord} ord, ska vara ${MIN_ORD} till ${MAX_ORD}`);
-  if (amne.length > 50) fel.push(`ämnesraden är ${amne.length} tecken, högst 50`);
+  if (amne.length > MAX_AMNE) fel.push(`ämnesraden är ${amne.length} tecken, högst ${MAX_AMNE}`);
   if (amne.length < 10) fel.push("ämnesraden är för kort");
   if (amne === amne.toUpperCase() && /[A-ZÅÄÖ]/.test(amne)) fel.push("ämnesraden är skriven med versaler");
   const lankar = [...brodtext.matchAll(/(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(\/\S*)?/gi)]
@@ -51,11 +69,15 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string): 
     if (!ok && !/^[a-z0-9-]+\.(se|nu|com|org|net)$/.test(ren)) fel.push(`otillåten länk: ${l}`);
   }
   if (!/rkkommunikation\.se/i.test(brodtext)) fel.push("hänvisning till rkkommunikation.se saknas");
-  if (/\b(du|dig|din|ditt|dina)\b/i.test(brodtext.replace(/\bdin webbplats\b/gi, ""))) fel.push("tilltalar med du i stället för ni");
+  if (tilltal === "ni" && /\b(du|dig|din|ditt|dina)\b/i.test(brodtext)) fel.push("tilltalar med du i stället för ni");
+  if (tilltal === "du" && /\b(ni|er|era|ert)\b/i.test(brodtext.replace(/\bHej\b/g, ""))) fel.push("tilltalar med ni i stället för du");
+  if (tilltal === "du" && !/^Hej [A-ZÅÄÖ][a-zåäöé-]+,/m.test(brodtext)) fel.push("hälsar inte med förnamn");
   if (/\bAI\b|språkmodell|artificiell/i.test(brodtext)) fel.push("nämner AI");
   if (/mätning saknas|statistik saknas|saknar\b[^.]{0,30}\b(mätning|statistik)|ingen mätning|ingen statistik|utan mätning/i.test(brodtext)) {
     fel.push("påstår att mätning saknas, ska vara att inget mätverktyg syns");
   }
+  const omdome = brodtext.match(OMDOMEN);
+  if (omdome) fel.push(`kritiserar mottagarens formulering ("${omdome[0]}")`);
   return fel;
 }
 
@@ -71,7 +93,6 @@ export function tillaggsfel(brodtext: string, fynd: FyndRad[]): string[] {
     const finns = forslag.some((fo) => rader.includes(normaliseraText(fo)));
     if (!finns) fel.push("det konkreta förslaget står inte ordagrant på en egen rad");
   }
-  // Siffror i mejlet ska finnas i fynden (kodräknade mått), inte komma från modellen
   const kalla = normaliseraText(fynd.map((f) => `${f.observation} ${f.insikt ?? ""} ${f.effekt} ${f.belagg_varde} ${f.belagg2_varde ?? ""} ${f.forslag_konkret ?? ""}`).join(" "));
   const siffror = [...brodtext.replace(/rkkommunikation\.se|https?:\/\/\S+/g, "").matchAll(/\b\d+(?:[.,]\d+)?\b/g)].map((m) => m[0]);
   for (const s of new Set(siffror)) {
@@ -94,13 +115,13 @@ export async function kvalitetsgrind(
   fynd: FyndRad[],
   bra: { text: string }[],
   mottagare: string | null,
-  alt: { testlage?: boolean; huvudinsikt?: string | null; profil?: string | null } = {},
+  alt: { testlage?: boolean; huvudinsikt?: string | null; profil?: string | null; tilltal?: Tilltal } = {},
 ): Promise<Grindresultat> {
   const k = konfig();
   const fel: string[] = [];
   const varningar: string[] = [];
 
-  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK));
+  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal));
   fel.push(...tillaggsfel(utkast.brodtext, fynd));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);
@@ -129,7 +150,7 @@ export async function kvalitetsgrind(
       innehall: [
         {
           type: "text",
-          text: `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nHuvudinsikt:\n${alt.huvudinsikt ?? "(ingen)"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
+          text: `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nTilltal som gäller: ${alt.tilltal ?? "okänt"}\n\nHuvudinsikt:\n${alt.huvudinsikt ?? "(ingen)"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
             fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, insikt: f.insikt, effekt: f.effekt, forslag_konkret: f.forslag_konkret, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde }, belagg2: f.belagg2_varde })),
             null,
             1,

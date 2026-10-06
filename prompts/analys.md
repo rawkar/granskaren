@@ -10,6 +10,7 @@ Sanning före allt. Ett fynd får bara finnas med om det finns belägg i underla
 
 Bygg först en kort profil av organisationen. Allt senare bedöms mot den.
 
+- person. Avgör om sajten drivs av en namngiven person: texterna är i jagform, ett personnamn står i rubrik, titel eller kontaktuppgifter, eller det är tydligt en enskild konsult eller hantverkare. Ange då fornamn (bara förnamnet, exakt som det stavas på sajten) och ett belägg. Är det en förening, ett företag med flera anställda eller en organisation utan namngiven person, sätt drivs_av_namngiven_person till false och fornamn till null. Mejlet hälsar med förnamn och säger du när personen är namngiven, annars ni.
 - vad_de_gor. Vad organisationen gör, säljer eller erbjuder.
 - for_vem. Vilka den vänder sig till.
 - omrade. Geografiskt område.
@@ -77,6 +78,8 @@ Tre åtgärder i prioritetsordning med insats och förväntad effekt (borja_med)
 ## Övrigt
 
 - Bedömningar av smak är inte tillåtna. Att en design känns gammal är inget fynd.
+- Kritisera aldrig mottagarens egna formuleringar med omdömen som att de är allmänna, intetsägande eller kunde stå var som helst. Skriv i stället vad som redan är starkt på sajten och föreslå att det får en mer framträdande plats. Observation och insikt ska gå att läsa av mottagaren utan att hon eller han känner sig bedömd.
+- Kalla aldrig en enskild konsult eller egenföretagare för byrå. Använd det ord sajten själv använder.
 - Effektbeskrivningar ska vara rimliga och försiktiga. Inga påhittade procenttal och inga löften om resultat.
 - Rubrik, observation, insikt, effekt och åtgärd skrivs på svenska, i naturliga meningar, utan tankstreck och utan utropstecken. Skriv som en erfaren kollega, inte som en granskare som delar ut betyg.
 - Fackord förklaras i klartext. Skriv "beskrivningen som syns i Googles sökresultat" hellre än "metabeskrivning", men ha gärna båda så att Rawaz förstår.
