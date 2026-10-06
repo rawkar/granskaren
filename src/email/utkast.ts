@@ -8,6 +8,7 @@ import type { Db } from "../db/index.js";
 import {
   braForProspekt,
   fyndForProspekt,
+  harFattMejl,
   loggaHandelse,
   sattStatus,
   sidorForProspekt,
@@ -136,6 +137,10 @@ export interface DraftAlternativ {
 export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): Promise<Utkast | null> {
   logg.info(`Utkast för ${p.doman} (#${p.id})`);
   const k = konfig();
+  if (harFattMejl(d, p.id)) {
+    logg.info("   har redan ett skickat eller köat förstamejl, inget nytt utkast");
+    return null;
+  }
   const fynd = fyndForProspekt(d, p.id, true);
   const huvudinsikt = p.huvudinsikt ? (JSON.parse(p.huvudinsikt) as Huvudinsikt) : null;
   const profil = p.profil ? (JSON.parse(p.profil) as Profil) : null;
