@@ -16,6 +16,8 @@ export interface Prospekt {
   granskad: string | null;
   profil: string | null;
   huvudinsikt: string | null;
+  kundtyp: number | null;
+  likhet: number | null;
 }
 
 export interface Sida {
@@ -97,6 +99,8 @@ export function laggTillProspekt(
     ort?: string | null;
     kalla?: string;
     kommentar?: string | null;
+    kundtyp?: number | null;
+    likhet?: number | null;
   },
 ): { id: number; ny: boolean } {
   const befintlig = d.prepare("SELECT id FROM prospekt WHERE doman = ?").get(p.doman) as
@@ -105,9 +109,9 @@ export function laggTillProspekt(
   if (befintlig) return { id: befintlig.id, ny: false };
   const r = d
     .prepare(
-      "INSERT INTO prospekt (doman, namn, bransch, ort, kalla, kommentar) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO prospekt (doman, namn, bransch, ort, kalla, kommentar, kundtyp, likhet) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .run(p.doman, p.namn ?? null, p.bransch ?? null, p.ort ?? null, p.kalla ?? "lista", p.kommentar ?? null);
+    .run(p.doman, p.namn ?? null, p.bransch ?? null, p.ort ?? null, p.kalla ?? "lista", p.kommentar ?? null, p.kundtyp ?? null, p.likhet ?? null);
   return { id: Number(r.lastInsertRowid), ny: true };
 }
 
@@ -149,7 +153,7 @@ export function sattStatus(d: Db, id: number, status: ProspektStatus, orsak?: st
 export function uppdateraProspekt(
   d: Db,
   id: number,
-  falt: Partial<Pick<Prospekt, "namn" | "organisationstyp" | "bransch" | "ort" | "profil" | "huvudinsikt">>,
+  falt: Partial<Pick<Prospekt, "namn" | "organisationstyp" | "bransch" | "ort" | "profil" | "huvudinsikt" | "kundtyp" | "likhet">>,
 ): void {
   const nycklar = Object.keys(falt) as (keyof typeof falt)[];
   if (nycklar.length === 0) return;

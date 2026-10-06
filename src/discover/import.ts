@@ -9,6 +9,7 @@ export interface ImportRad {
   bransch?: string;
   ort?: string;
   kommentar?: string;
+  kundtyp?: string;
 }
 
 /** Enkel CSV-tolk som klarar citattecken, kommatecken och semikolon som avgränsare. */
@@ -105,6 +106,7 @@ export function importeraRader(d: Db, rader: ImportRad[], kalla = "lista"): Impo
       ort: rad.ort || null,
       kommentar: rad.kommentar || null,
       kalla,
+      kundtyp: rad.kundtyp && /^[1-9]$/.test(rad.kundtyp.trim()) ? Number.parseInt(rad.kundtyp, 10) : null,
     });
     if (ny) {
       res.tillagda.push(doman);
@@ -130,6 +132,7 @@ export function importeraFil(d: Db, sokvag: string): ImportResultat {
       bransch: r.bransch,
       ort: r.ort,
       kommentar: r.kommentar,
+      kundtyp: r.kundtyp,
     })),
   );
 }

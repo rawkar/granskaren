@@ -32,6 +32,10 @@ Kör med `npm run granskaren -- <kommando>` eller, efter `npm link`, bara `grans
 | `draft [--antal N]` | Skriver mejlutkast för granskade sajter. Letar upp mejladress på sajten, väljer två eller tre bekräftade fynd, skriver mejlet och kör kvalitetsgrinden. |
 | `draft --doman exempel.se --test-till du@exempel.se` | Utkast för en viss sajt, adresserat till en testadress i stället för organisationens. |
 | `review` | Går igenom granskningskön, ett utkast i taget. Godkänn, redigera i din textredigerare eller kasta. |
+| `forebilder` | Läser förebilderna i `prompts/kundprofil.md`, profilerar dem en gång (likhetsprofil per kundtyp) och lägger dem på spärrlistan som befintliga kunder. |
+| `segment [--antal N]` | Tar fram kombinationer av yrke eller bransch och ort per kundtyp enligt fördelningen, med likhetsprofilerna som underlag. `--lista` visar befintliga. |
+| `discover [--antal N] [--kalla webb,lankar] [--kundtyp N]` | Hittar nya sajter: webbsökning per segment och utgående länkar från förebildernas sajter (ett steg). Varje träff förfiltreras med kodsignaler och en likhetspoäng mot förebilderna. Godkända blir prospekt med kundtyp. |
+| `weekly [--justera]` | Veckorapport per kundtyp och förslag på ny fördelning utifrån svar. Ingen typ går under minsta andel. |
 | `send [--max N]` | Skickar köade mejl (status `koad`) på vardagar inom sändfönstret, högst `MAX_MEJL_PER_DAG` per dag, med 4 till 15 minuters paus mellan. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. |
 | `send --test-till du@exempel.se [--doman x.se]` | Skickar ett utkast som test till din egen adress. Går runt torrkörning, fönster och tak, men rör inte kön. |
 | `report <domän>` | Skriver ut rapporten för en sajt. |

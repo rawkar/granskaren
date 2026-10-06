@@ -156,6 +156,56 @@ export const MIGRERINGAR: { namn: string; sql: string }[] = [
       ALTER TABLE fynd ADD COLUMN belagg2_varde TEXT;
     `,
   },
+  {
+    namn: "003_kundtyp_forebilder_segment",
+    sql: `
+      ALTER TABLE prospekt ADD COLUMN kundtyp INTEGER;
+      ALTER TABLE prospekt ADD COLUMN likhet REAL;
+
+      CREATE TABLE likhetsprofil (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        doman TEXT NOT NULL UNIQUE,
+        beskrivning TEXT,
+        kundtyp INTEGER NOT NULL,
+        yrke TEXT,
+        ort TEXT,
+        profil TEXT NOT NULL,
+        skapad TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE segment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kundtyp INTEGER NOT NULL,
+        yrke TEXT NOT NULL,
+        ort TEXT NOT NULL,
+        sokfras TEXT NOT NULL,
+        motivering TEXT,
+        anvand INTEGER NOT NULL DEFAULT 0,
+        traffar INTEGER NOT NULL DEFAULT 0,
+        skapad TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(kundtyp, yrke, ort)
+      );
+
+      CREATE TABLE kandidater (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        doman TEXT NOT NULL UNIQUE,
+        namn TEXT,
+        kalla TEXT NOT NULL,
+        segment_id INTEGER REFERENCES segment(id) ON DELETE SET NULL,
+        kundtyp INTEGER,
+        likhet REAL,
+        utfall TEXT NOT NULL,
+        orsak TEXT,
+        skapad TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE installningar (
+        nyckel TEXT PRIMARY KEY,
+        varde TEXT NOT NULL,
+        andrad TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
 ];
 
 export const PROSPEKT_STATUS = [

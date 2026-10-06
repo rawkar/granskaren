@@ -52,12 +52,16 @@ export function sattIhop(brodtext: string, tilltal: Tilltal = "ni"): string {
   return `${brodtext.trim()}\n${signatur()}\n\n${avslutsrad(tilltal)}\n`;
 }
 
-/** Tilltal och förnamn utifrån profilen. Du bara när personen är namngiven med rimlig säkerhet. */
-export function tilltalFor(profil: Profil | null): { tilltal: Tilltal; fornamn: string | null } {
+/**
+ * Tilltal och förnamn. Kundtypen styr när den finns: kundtyp 1 får förnamn och du, övriga ni.
+ * Saknas kundtyp avgör profilen: du bara när personen är namngiven med rimlig säkerhet.
+ */
+export function tilltalFor(profil: Profil | null, kundtyp: number | null = null): { tilltal: Tilltal; fornamn: string | null } {
   const p = profil?.person;
-  if (p && p.drivs_av_namngiven_person && p.fornamn && p.sakerhet >= 0.7) {
-    return { tilltal: "du", fornamn: p.fornamn.trim().split(/\s+/)[0] };
-  }
+  const fornamn = p?.fornamn ? p.fornamn.trim().split(/\s+/)[0] : null;
+  if (kundtyp === 1) return { tilltal: "du", fornamn };
+  if (kundtyp !== null && kundtyp > 1) return { tilltal: "ni", fornamn: null };
+  if (p && p.drivs_av_namngiven_person && fornamn && p.sakerhet >= 0.7) return { tilltal: "du", fornamn };
   return { tilltal: "ni", fornamn: null };
 }
 
@@ -164,7 +168,7 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
     d.prepare("UPDATE prospekt SET orsak_hoppad = 'endast_formular' WHERE id = ?").run(p.id);
     return null;
   }
-  const tilltal = tilltalFor(profil);
+  const tilltal = tilltalFor(profil, p.kundtyp);
   const amne = byggAmne(k.AMNESMALL, p.doman, p.namn);
   logg.info(`   mottagare: ${mottagare}${alt.testTill ? " (testläge)" : ` (${kontakt?.typ}, från ${kontakt?.kallsida})`}`);
   logg.info(`   tilltal: ${tilltal.tilltal}${tilltal.fornamn ? ` (${tilltal.fornamn})` : ""}, ämne: ${amne}`);

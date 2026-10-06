@@ -9,6 +9,10 @@ import { rapportSokvag } from "./report/rapport.js";
 import { review } from "./email/review.js";
 import { skapaUtkast } from "./email/utkast.js";
 import { skickaKoade, skickaTest } from "./email/skicka.js";
+import { profileraForebilder } from "./discover/forebilder.js";
+import { allaSegment, skapaSegment } from "./discover/segment.js";
+import { discover } from "./discover/discover.js";
+import { utfallPerKundtyp, weekly } from "./report/weekly.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
 
@@ -133,6 +137,59 @@ program
   });
 
 program
+  .command("forebilder")
+  .description("Profilerar förebilderna i prompts/kundprofil.md och lägger dem på spärrlistan som befintliga kunder")
+  .option("--igen", "profilera om även redan profilerade", false)
+  .action(async (o: { igen: boolean }) => {
+    konfig();
+    const r = await profileraForebilder(db(), { igen: o.igen });
+    logg.info(`Klart. Profilerade: ${r.profilerade}, hoppade: ${r.hoppade}, fel: ${r.fel}`);
+  });
+
+program
+  .command("segment")
+  .description("Tar fram kombinationer av yrke eller bransch och ort per kundtyp enligt fördelningen")
+  .option("--antal <n>", "antal nya segment", "12")
+  .option("--lista", "visa befintliga segment i stället för att skapa nya", false)
+  .action(async (o: { antal: string; lista: boolean }) => {
+    konfig();
+    const d = db();
+    if (o.lista) {
+      for (const s of allaSegment(d)) console.log(`${String(s.id).padStart(3)}  kundtyp ${s.kundtyp}  ${s.yrke} i ${s.ort}  "${s.sokfras}"  ${s.anvand ? `använt, ${s.traffar} träffar` : "oanvänt"}`);
+      return;
+    }
+    const nya = await skapaSegment(d, Math.max(1, Number.parseInt(o.antal, 10) || 12));
+    logg.info(`Klart. ${nya.length} nya segment. Kör granskaren discover för att söka.`);
+  });
+
+program
+  .command("discover")
+  .description("Hittar nya sajter via webbsökning och förebildernas länkar, förfiltrerar och lägger in godkända som prospekt")
+  .option("--antal <n>", "önskat antal godkända prospekt", "10")
+  .option("--kalla <kallor>", "källor i ordning, kommaseparerat: webb, lankar", "webb,lankar")
+  .option("--kundtyp <n>", "bara den här kundtypen")
+  .option("--segment <id>", "använd ett visst segment")
+  .action(async (o: { antal: string; kalla: string; kundtyp?: string; segment?: string }) => {
+    konfig();
+    const r = await discover(db(), {
+      antal: Math.max(1, Number.parseInt(o.antal, 10) || 10),
+      kallor: o.kalla.split(",").map((s) => s.trim()).filter(Boolean),
+      kundtyp: o.kundtyp ? Number.parseInt(o.kundtyp, 10) : undefined,
+      segmentId: o.segment ? Number.parseInt(o.segment, 10) : undefined,
+    });
+    logg.info(`Nya prospekt: ${r.godkanda}. Granska dem med: granskaren audit`);
+  });
+
+program
+  .command("weekly")
+  .description("Veckorapport per kundtyp och förslag på ny fördelning utifrån svar")
+  .option("--justera", "spara den föreslagna fördelningen", false)
+  .action((o: { justera: boolean }) => {
+    konfig();
+    for (const rad of weekly(db(), { justera: o.justera })) console.log(rad);
+  });
+
+program
   .command("send")
   .description("Skickar köade mejl inom tidsfönster och dagligt tak. Vid TORRKORNING=true skrivs filer i data/torrkorning/")
   .option("--max <n>", "högsta antal att skicka i den här körningen")
@@ -231,6 +288,15 @@ program
     console.log(`  Spärrlista              ${sparr}`);
     console.log(`  API-kostnad totalt      ${kost.s.toFixed(2)} USD (${kost.i} tokens in, ${kost.u} ut)`);
     console.log(`  Kostnad per granskad    ${granskade ? `${(kost.s / granskade).toFixed(3)} USD` : "-"}`);
+    const perTyp = utfallPerKundtyp(d);
+    if (perTyp.some((r) => r.prospekt > 0)) {
+      console.log("");
+      console.log("Per kundtyp");
+      console.log(`  ${"Kundtyp".padEnd(36)} ${"prosp".padStart(6)} ${"gransk".padStart(7)} ${"skick".padStart(6)} ${"svar".padStart(5)} ${"pos".padStart(4)}`);
+      for (const r of perTyp) {
+        console.log(`  ${`${r.kundtyp || "-"}. ${r.namn}`.padEnd(36)} ${String(r.prospekt).padStart(6)} ${String(r.granskade).padStart(7)} ${String(r.skickade).padStart(6)} ${String(r.svar).padStart(5)} ${String(r.positiva).padStart(4)}`);
+      }
+    }
     const hoppade = alla.filter((p) => p.status === "hoppad");
     if (hoppade.length) {
       console.log("");
