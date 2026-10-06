@@ -138,6 +138,38 @@ export function skrivTorrkorning(b: Brev, doman: string): string {
   return fil;
 }
 
+/** Varje skarpt skickat mejl sparas som fil i data/skickade/ så att det går att läsa i efterhand. */
+export function skrivKopia(b: Brev, doman: string, tid: string): string {
+  const k = konfig();
+  const fil = path.join(dataMapp("skickade"), `${tid.replace(/[: ]/g, "-")}_${filnamnSaker(doman)}.txt`);
+  fs.writeFileSync(
+    fil,
+    [`Från: ${k.AVSANDARE_NAMN} <${k.AVSANDARE_EPOST || k.SMTP_USER}>`, `Till: ${b.till}`, `Skickat: ${tid}`, `Message-ID: ${b.messageId}`, `Ämne: ${b.amne}`, "", b.text].join("\n"),
+    "utf8",
+  );
+  return fil;
+}
+
+export interface SkickatMejl {
+  id: number;
+  doman: string;
+  namn: string | null;
+  mottagare: string | null;
+  amne: string;
+  text: string;
+  skickad: string | null;
+  message_id: string | null;
+  typ: string;
+}
+
+/** Alla skarpt skickade mejl, senaste först. */
+export function skickadeMejl(d: Db, doman?: string): SkickatMejl[] {
+  const sql = `SELECT m.id, p.doman, p.namn, m.mottagare, m.amne, m.text, m.skickad, m.message_id, m.typ
+               FROM mejl m JOIN prospekt p ON p.id = m.prospekt_id
+               WHERE m.status = 'skickad' ${doman ? "AND p.doman = ?" : ""} ORDER BY m.skickad DESC`;
+  return (doman ? d.prepare(sql).all(doman) : d.prepare(sql).all()) as SkickatMejl[];
+}
+
 // ---------- utskick ----------
 
 export interface SandAlternativ {
@@ -187,9 +219,11 @@ export async function skickaKoade(d: Db, alt: SandAlternativ = {}): Promise<{ sk
         continue;
       }
       const id = await skickaBrev(k, brev);
-      d.prepare("UPDATE mejl SET status = 'skickad', message_id = ?, skickad = ? WHERE id = ?").run(id, lokalTid(new Date()), m.id);
+      const tid = lokalTid(new Date());
+      d.prepare("UPDATE mejl SET status = 'skickad', message_id = ?, skickad = ? WHERE id = ?").run(id, tid, m.id);
       sattStatus(d, m.prospekt_id, "skickad");
-      loggaHandelse(d, m.prospekt_id, "skickat", { mottagare: m.mottagare, message_id: id, amne: m.amne, fynd: JSON.parse(m.anvanda_fynd) });
+      const kopia = skrivKopia({ ...brev, messageId: id }, p?.doman ?? String(m.prospekt_id), tid);
+      loggaHandelse(d, m.prospekt_id, "skickat", { mottagare: m.mottagare, message_id: id, amne: m.amne, fynd: JSON.parse(m.anvanda_fynd), kopia });
       logg.info(`   skickat till ${m.mottagare} (${p?.doman}), Message-ID ${id}`);
       res.skickade++;
     }

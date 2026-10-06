@@ -8,7 +8,7 @@ import { importeraFil } from "./discover/import.js";
 import { rapportSokvag } from "./report/rapport.js";
 import { review } from "./email/review.js";
 import { skapaUtkast } from "./email/utkast.js";
-import { skickaKoade, skickaTest } from "./email/skicka.js";
+import { skickadeMejl, skickaKoade, skickaTest } from "./email/skicka.js";
 import { profileraForebilder } from "./discover/forebilder.js";
 import { allaSegment, skapaSegment } from "./discover/segment.js";
 import { discover } from "./discover/discover.js";
@@ -222,6 +222,35 @@ program
     }
     const r = await skickaKoade(d, { max: o.max ? Number.parseInt(o.max, 10) : undefined });
     logg.info(`Klart. Skickade: ${r.skickade}, torrkörda: ${r.torrkorda}, stoppade: ${r.stoppade}`);
+  });
+
+program
+  .command("skickade")
+  .description("Visar mejl som faktiskt har skickats i skarpt läge")
+  .option("--doman <doman>", "visa hela mejlet till den här domänen")
+  .action((o: { doman?: string }) => {
+    konfig();
+    const d = db();
+    if (o.doman) {
+      const dom = normaliseraDoman(o.doman) ?? o.doman;
+      const lista = skickadeMejl(d, dom);
+      if (lista.length === 0) {
+        logg.info(`Inget skarpt skickat mejl till ${dom}.`);
+        return;
+      }
+      for (const m of lista) {
+        console.log(`Skickat: ${m.skickad}\nTill: ${m.mottagare}\nMessage-ID: ${m.message_id}\nÄmne: ${m.amne}\n\n${m.text}`);
+      }
+      return;
+    }
+    const lista = skickadeMejl(d);
+    if (lista.length === 0) {
+      logg.info("Inga skarpt skickade mejl ännu. Testmejl och torrkörningar räknas inte.");
+      return;
+    }
+    console.log(`${"Skickat".padEnd(20)} ${"Domän".padEnd(26)} ${"Till".padEnd(34)} Ämne`);
+    for (const m of lista) console.log(`${(m.skickad ?? "").padEnd(20)} ${m.doman.padEnd(26)} ${(m.mottagare ?? "").padEnd(34)} ${m.amne}`);
+    console.log(`\nKopior finns i data/skickade/. Hela texten: granskaren skickade --doman <domän>`);
   });
 
 program
