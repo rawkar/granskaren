@@ -38,6 +38,7 @@ Kör med `npm run granskaren -- <kommando>` eller, efter `npm link`, bara `grans
 | `weekly [--justera]` | Veckorapport per kundtyp och förslag på ny fördelning utifrån svar. Ingen typ går under minsta andel. |
 | `send [--max N]` | Skickar köade mejl (status `koad`) på vardagar inom sändfönstret, högst `MAX_MEJL_PER_DAG` per dag, med 4 till 15 minuters paus mellan. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. |
 | `send --test-till du@exempel.se [--doman x.se]` | Skickar ett utkast som test till din egen adress. Går runt torrkörning, fönster och tak, men rör inte kön. |
+| `skickade [--doman x.se]` | Listar mejl som faktiskt har skickats i skarpt läge. Med `--doman` visas hela mejlet. Testmejl och torrkörningar räknas inte. En kopia av varje skickat mejl ligger också i `data/skickade/`. |
 | `report <domän>` | Skriver ut rapporten för en sajt. |
 | `status` | Visar prospekt per status, mätpunkter och kostnad. |
 | `block <domän eller adress>` | Lägger till på spärrlistan. |
