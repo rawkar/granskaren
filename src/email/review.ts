@@ -5,6 +5,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import type { Db } from "../db/index.js";
 import { fyndForProspekt, hamtaProspekt, loggaHandelse, sattStatus } from "../db/fragor.js";
+import { rapportSokvag } from "../report/rapport.js";
 import { sprakfel, antalOrd } from "./grind.js";
 import { konfig } from "../config.js";
 import { AVSLUTSRAD, signatur } from "./utkast.js";
@@ -23,12 +24,32 @@ interface MejlRad {
 /** Går igenom granskningskön, ett utkast i taget. Godkänn, redigera eller kasta. */
 export async function review(d: Db): Promise<void> {
   const ko = d.prepare("SELECT * FROM mejl WHERE status IN ('i_granskning', 'utkast') ORDER BY id").all() as MejlRad[];
-  if (ko.length === 0) {
+  // Sajter i kön utan utkast: ingen huvudinsikt eller inget fynd med djup 3. Rawaz avgör själv utifrån rapporten.
+  const utanUtkast = d
+    .prepare(
+      `SELECT p.id, p.doman, p.namn, (SELECT detaljer FROM handelser h WHERE h.prospekt_id = p.id AND h.typ = 'utkast_hoppat' ORDER BY h.id DESC LIMIT 1) AS orsak
+       FROM prospekt p WHERE p.status = 'i_granskning' AND NOT EXISTS (SELECT 1 FROM mejl m WHERE m.prospekt_id = p.id AND m.status IN ('i_granskning', 'utkast'))`,
+    )
+    .all() as { id: number; doman: string; namn: string | null; orsak: string | null }[];
+  if (ko.length === 0 && utanUtkast.length === 0) {
     console.log("Granskningskön är tom.");
     return;
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
+    for (const p of utanUtkast) {
+      console.log("\n" + "=".repeat(78));
+      console.log(`${p.namn ?? ""} (${p.doman})   inget mejl skrevs: ${p.orsak ?? "okänd orsak"}`);
+      console.log(`Rapport: ${rapportSokvag(p.doman)}`);
+      console.log("=".repeat(78));
+      const svar = (await rl.question("[k]lar, lämna som granskad   [h]oppa över   [a]vsluta > ")).trim().toLowerCase();
+      if (svar === "k") {
+        sattStatus(d, p.id, "granskad");
+        loggaHandelse(d, p.id, "sedd_i_review_utan_mejl");
+      } else if (svar === "a") {
+        return;
+      }
+    }
     for (const [i, m] of ko.entries()) {
       const p = hamtaProspekt(d, m.prospekt_id);
       if (!p) continue;
@@ -42,9 +63,10 @@ export async function review(d: Db): Promise<void> {
       console.log(`Ämne: ${m.amne}\n`);
       console.log(m.text);
       console.log("-".repeat(78));
+      if (p.huvudinsikt) console.log(`Huvudinsikt: ${(JSON.parse(p.huvudinsikt) as { text: string }).text}`);
       console.log("Fynd som mejlet bygger på:");
       for (const f of fynd) {
-        console.log(`  [${f.omrade}] ${f.rubrik}`);
+        console.log(`  [${f.omrade}, djup ${f.djup}] ${f.rubrik}`);
         console.log(`      ${f.observation}`);
         console.log(`      Belägg: ${f.belagg_typ} ${f.belagg_url}  ${f.belagg_varde}`);
       }

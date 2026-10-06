@@ -114,7 +114,9 @@ describe("sidurval", () => {
   it("väljer kontakt, om, handling, nyhet och menysidor inom max", () => {
     const v = valjSidor(html, "https://exempelforeningen.se/", 8);
     const roller = v.map((x) => x.roll);
-    expect(roller.slice(0, 4)).toEqual(["kontakt", "om", "handling", "nyhet"]);
+    expect(roller.slice(0, 4)).toEqual(["kontakt", "om", "handling", "tjanst"]);
+    expect(roller).toContain("nyhet");
+    expect(v.find((x) => x.roll === "tjanst")?.url).toBe("https://exempelforeningen.se/verksamhet");
     expect(v.find((x) => x.roll === "handling")?.url).toBe("https://exempelforeningen.se/bli-medlem");
     expect(v.length).toBeLessThanOrEqual(7);
     expect(new Set(v.map((x) => x.url)).size).toBe(v.length);

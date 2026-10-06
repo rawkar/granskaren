@@ -38,9 +38,21 @@ Kör med `npm run granskaren -- <kommando>` eller, efter `npm link`, bara `grans
 
 Kommandona `send`, `sync`, `followup`, `discover` och `run` tillkommer i fas 3 till 6.
 
+## Så bedömer analysen
+
+Analysen görs i ett enda modellanrop som ger fyra saker i samma svar: en kort profil av organisationen (vad de gör, för vem, sajtens syfte, viktigaste handling), fyra till sex fynd, en huvudinsikt som binder ihop minst två fynd, och tre åtgärder Rawaz skulle börja med. Allt bedöms mot sajtens syfte, inte mot en checklista.
+
+Varje fynd har ett djup. 1 betyder att ett verktyg hittar det, 2 kräver tolkning av mätdata, 3 kräver omdöme om kommunikationen. Fynd med djup 3 måste ha två belägg som båda håller i verifieringen. Minst ett fynd per sajt har ett konkret förslag, till exempel en ny sidtitel, som sedan skrivs ordagrant på en egen rad i mejlet.
+
+Siffror som används i fynd och mejl kommer från kodräknade mått i `data/underlag/<domän>.json` under `matt`: andel vi-ord mot ni-ord, läsbarhetsindex LIX, antal formulärfält per formulär, antal case och plattform. Modellen räknar aldrig själv.
+
+Filen `prompts/rawaz-perspektiv.md` är din. Fyll i den med dina principer och vanligaste iakttagelser, så vägs de in i analysen. Den är frivillig och tom från början.
+
 ## Mejlutkast och kvalitetsgrind
 
-`draft` sparar utkastet i databasen och som fil i `data/utkast/<domän>.txt`. Kvalitetsgrinden kontrollerar med kod det som går (tankstreck, kolon, utropstecken, längd 120 till 180 ord, ämnesradens längd, otillåtna länkar, du-tilltal) och låter den snabba modellen kontrollera att varje påstående om sajten har stöd i ett bekräftat fynd. Utkast som stoppas får status `utkast` och syns i `review` tillsammans med orsaken. I läget `granska` hamnar alla godkända utkast i granskningskön. I läget `auto` köas utkast med säkerhet över `MIN_SAKERHET_AUTO` direkt för utskick.
+Mejlet byggs kring huvudinsikten med två eller tre fynd som stöder den. Minst ett fynd har djup 3, högst ett har djup 1, och minst ett har ett konkret förslag. Brödtexten är 150 till 220 ord. Saknas huvudinsikt eller fynd med djup 3 skrivs inget mejl, och sajten läggs i granskningskön tillsammans med rapporten så att du kan avgöra själv. Om mätning skriver mejlet alltid att inget mätverktyg syns på sidan, aldrig att mätning saknas.
+
+`draft` sparar utkastet i databasen och som fil i `data/utkast/<domän>.txt`. Kvalitetsgrinden kontrollerar med kod det som går (tankstreck, kolon, utropstecken, längd, ämnesradens längd, otillåtna länkar, du-tilltal, fyndens djup, att det konkreta förslaget står på en egen rad och att varje siffra i mejlet finns i fynden) och låter den snabba modellen kontrollera att varje påstående om sajten har stöd i ett bekräftat fynd. Utkast som stoppas får status `utkast` och syns i `review` tillsammans med orsaken. I läget `granska` hamnar alla godkända utkast i granskningskön. I läget `auto` köas utkast med säkerhet över `MIN_SAKERHET_AUTO` direkt för utskick.
 
 Prompten för mejlet ligger i `prompts/mejl.md` och prompten för påståendekontrollen i `prompts/grind.md`. Signaturen byggs från `AVSANDARE_*` i `.env`.
 

@@ -23,6 +23,7 @@ import { korAxe } from "./measure/axe.js";
 import { kontrolleraSajt, kontrolleraSida, type SidKontroll } from "./measure/kontroller.js";
 import { kontrolleraLankar } from "./measure/lankar.js";
 import { korLighthouse } from "./measure/lighthouse.js";
+import { mattForSajt, mattForSida, type SidMatt } from "./measure/matt.js";
 import { skrivRapport, underlagSokvag } from "./report/rapport.js";
 import { dataMapp, filnamnSaker, skrivJson } from "./util/fil.js";
 import { logg } from "./util/logg.js";
@@ -39,7 +40,6 @@ const PARKERAD = /domain is parked|parkerad dom[aä]n|k[oö]p denna dom[aä]n|th
 export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ = {}): Promise<"granskad" | "hoppad" | "fel"> {
   logg.info(`Granskar ${p.doman} (#${p.id})`);
 
-  // Kvalificering som inte kräver nätverk
   if (arSparrad(d, p.doman)) return hoppa(d, p, "spärrlista");
   if (harFattMejl(d, p.id)) return hoppa(d, p, "har redan fått mejl");
 
@@ -59,7 +59,6 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     if (PARKERAD.test(startText) || ordStart < 10) return hoppa(d, p, "parkerad eller under uppbyggnad");
   }
 
-  // Spara sidor
   for (const s of h.sidor) {
     sparaSida(d, {
       prospekt_id: p.id,
@@ -79,31 +78,34 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
   if (h.robotsTxt) sparaMatning(d, p.id, `https://${p.doman}/robots.txt`, "robots", { text: h.robotsTxt, regler: h.robots });
   if (h.sitemapXml) sparaMatning(d, p.id, h.sitemapUrl!, "sitemap", { text: h.sitemapXml.slice(0, 20000) });
 
-  // Egna kontroller
-  logg.steg("kör egna kontroller");
+  // Egna kontroller och kodmått
+  logg.steg("kör egna kontroller och kodmått");
   const hamtade = h.sidor.filter((s) => !s.fel && s.html);
   const kontroller = new Map<string, SidKontroll>();
+  const matt = new Map<string, SidMatt>();
   for (const s of hamtade) {
-    const k = kontrolleraSida(s.html, s.slutligUrl || s.url, s.text);
+    const url = s.slutligUrl || s.url;
+    const k = kontrolleraSida(s.html, url, s.text);
     kontroller.set(s.url, k);
     sparaMatning(d, p.id, s.url, "kontroll", k);
+    const m = mattForSida(s.html, url, s.text);
+    matt.set(s.url, m);
+    sparaMatning(d, p.id, s.url, "matt", m);
   }
+  const sajtMatt = mattForSajt(hamtade.map((s) => ({ url: s.slutligUrl || s.url, html: s.html })), h.sitemapXml);
+  sparaMatning(d, p.id, h.slutligStartUrl, "matt_sajt", sajtMatt);
 
-  // Stor organisation med egen kommunikationsfunktion?
-  const kontaktText = hamtade
-    .filter((s) => s.roll === "kontakt" || s.roll === "om")
-    .map((s) => s.text)
-    .join("\n");
+  const kontaktText = hamtade.filter((s) => s.roll === "kontakt" || s.roll === "om").map((s) => s.text).join("\n");
   const traff = kontaktText.match(STOR_ORGANISATION);
   if (traff) return hoppa(d, p, `stor organisation med egen kommunikationsfunktion ("${traff[0]}" på kontakt- eller om-sidan)`);
 
-  // Länkkontroll
   logg.steg("kontrollerar länkar");
   const lankar = await kontrolleraLankar(hamtade.map((s) => ({ url: s.slutligUrl || s.url, html: s.html })));
   sparaMatning(d, p.id, h.slutligStartUrl, "lankar", lankar.resultat);
 
-  // Lighthouse och axe på startsida och handlingssida
-  const matSidor = hamtade.filter((s) => s.roll === "start" || s.roll === "handling");
+  // Lighthouse och axe på startsida och handlingssida (eller tjänstesida om handlingssida saknas)
+  const handling = hamtade.find((s) => s.roll === "handling") ?? hamtade.find((s) => s.roll === "tjanst");
+  const matSidor = hamtade.filter((s) => s.roll === "start" || s === handling);
   const lh = new Map<string, Awaited<ReturnType<typeof korLighthouse>>>();
   const ax = new Map<string, Awaited<ReturnType<typeof korAxe>>>();
   for (const s of matSidor) {
@@ -122,7 +124,6 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     sparaMatning(d, p.id, url, "axe", a);
   }
 
-  // Sajtkontroll och samlat underlag
   const sajt = kontrolleraSajt(
     hamtade.map((s) => ({ url: s.slutligUrl || s.url, roll: s.roll, kontroll: kontroller.get(s.url)!, sparningsAnrop: s.sparningsAnrop })),
     { sitemapUrl: h.sitemapUrl, robotsFinns: !!h.robotsTxt, https: h.https, lankar: lankar.resultat, antalKontrolleradeLankar: lankar.antal },
@@ -136,7 +137,8 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     ort: p.ort,
     granskad: new Date().toISOString(),
     sajt,
-    sidor: hamtade.map((s) => byggSidUnderlag(s, kontroller.get(s.url)!, lh.get(s.url) ?? null, ax.get(s.url) ?? null)),
+    matt: sajtMatt,
+    sidor: hamtade.map((s) => byggSidUnderlag(s, kontroller.get(s.url)!, matt.get(s.url) ?? null, lh.get(s.url) ?? null, ax.get(s.url) ?? null)),
   };
   skrivJson(underlagSokvag(p.doman), underlag);
   loggaHandelse(d, p.id, "hamtad", { sidor: hamtade.length, lankar: lankar.antal });
@@ -148,18 +150,21 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     return "granskad";
   }
 
-  // Analys
+  // Analys: profil, fynd och huvudinsikt i ett anrop
   logg.steg("analyserar med språkmodell");
   const analys = await analysera(d, p.id, underlag);
   uppdateraProspekt(d, p.id, {
     organisationstyp: analys.organisationstyp,
     namn: p.namn ?? analys.organisationsnamn ?? null,
+    profil: JSON.stringify({ ...analys.profil, borja_med: analys.borja_med }),
+    huvudinsikt: analys.huvudinsikt ? JSON.stringify(analys.huvudinsikt) : null,
   });
   for (const b of analys.bra) sparaBra(d, p.id, b.text, b.url);
 
   // Verifiering
   logg.steg(`verifierar ${analys.fynd.length} fynd`);
   let bekraftade = 0;
+  const bekraftadeIds = new Set<string>();
   for (const f of analys.fynd) {
     const radId = sparaFynd(d, {
       prospekt_id: p.id,
@@ -176,6 +181,15 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
       allvar: f.allvar,
       sakerhet: f.sakerhet,
       latt_att_forklara: f.latt_att_forklara,
+      djup: f.djup,
+      insikt: f.insikt,
+      rotorsak: f.rotorsak,
+      forslag_konkret: f.forslag_konkret,
+      insats: f.insats,
+      kopplar_till_syfte: f.kopplar_till_syfte ? 1 : 0,
+      belagg2_url: f.belagg2?.url ?? null,
+      belagg2_typ: f.belagg2?.typ ?? null,
+      belagg2_varde: f.belagg2?.varde ?? null,
     });
     let v: Awaited<ReturnType<typeof verifieraFynd>>;
     try {
@@ -184,14 +198,30 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
       v = { verifierad: false, metod: "ingen", not: `Verifieringen misslyckades: ${e instanceof Error ? e.message : String(e)}` };
     }
     sattVerifiering(d, radId, v.verifierad, v.metod, v.not);
-    if (v.verifierad) bekraftade++;
-    logg.info(`   ${v.verifierad ? "ok " : "nej"}  ${f.id} ${f.omrade} ${f.rubrik}  [${v.metod}] ${v.verifierad ? "" : v.not}`);
+    if (v.verifierad) {
+      bekraftade++;
+      bekraftadeIds.add(f.id);
+    }
+    logg.info(`   ${v.verifierad ? "ok " : "nej"}  ${f.id} ${f.omrade} djup ${f.djup}  ${f.rubrik}  [${v.metod}] ${v.verifierad ? "" : v.not}`);
+  }
+
+  // Huvudinsikten håller bara om minst två av dess fynd bekräftades
+  if (analys.huvudinsikt) {
+    const kvar = analys.huvudinsikt.fynd_ids.filter((id) => bekraftadeIds.has(id));
+    if (kvar.length < 2) {
+      logg.info(`   huvudinsikten stryks: bara ${kvar.length} av dess fynd bekräftades`);
+      uppdateraProspekt(d, p.id, { huvudinsikt: null });
+      analys.huvudinsikt = null;
+    } else {
+      analys.huvudinsikt.fynd_ids = kvar;
+      uppdateraProspekt(d, p.id, { huvudinsikt: JSON.stringify(analys.huvudinsikt) });
+    }
   }
 
   const rapport = skrivRapport(d, p.id, underlag, analys.sammanfattning, analys.valskott);
   sattStatus(d, p.id, "granskad");
-  loggaHandelse(d, p.id, "granskad", { fynd: analys.fynd.length, bekraftade, valskott: analys.valskott });
-  logg.info(`   ${bekraftade} av ${analys.fynd.length} fynd bekräftade. Rapport: ${rapport}`);
+  loggaHandelse(d, p.id, "granskad", { fynd: analys.fynd.length, bekraftade, valskott: analys.valskott, huvudinsikt: !!analys.huvudinsikt });
+  logg.info(`   ${bekraftade} av ${analys.fynd.length} fynd bekräftade. ${analys.huvudinsikt ? "Huvudinsikt finns." : "Ingen huvudinsikt."} Rapport: ${rapport}`);
   return "granskad";
 }
 

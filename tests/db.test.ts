@@ -37,6 +37,8 @@ describe("databasregler", () => {
     const bas = {
       prospekt_id: id, omrade: "D", tjansteomrade: "webb", rubrik: "r", observation: "o", belagg_url: "https://exempel.se/",
       belagg_typ: "saknat_element", belagg_varde: "h1", effekt: "e", atgard: "a", allvar: 2, sakerhet: 0.9, latt_att_forklara: 2,
+      djup: 2, insikt: null, rotorsak: null, forslag_konkret: null, insats: "liten", kopplar_till_syfte: 1,
+      belagg2_url: null, belagg2_typ: null, belagg2_varde: null,
     };
     const a = sparaFynd(d, { ...bas, fynd_id: "f-001" });
     sparaFynd(d, { ...bas, fynd_id: "f-002" });

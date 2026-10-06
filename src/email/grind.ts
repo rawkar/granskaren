@@ -3,6 +3,7 @@ import { konfig } from "../config.js";
 import type { Db } from "../db/index.js";
 import { arSparrad, harFattMejl, type FyndRad, type Prospekt } from "../db/fragor.js";
 import { lasPrompt, strukturerat } from "../analyze/klient.js";
+import { normaliseraText } from "../analyze/verifiering.js";
 import { giltig } from "./kontakter.js";
 
 export interface Grindresultat {
@@ -12,6 +13,9 @@ export interface Grindresultat {
   sakerhet: number;
   utfall: "koad" | "i_granskning" | "stoppad";
 }
+
+export const MIN_ORD = 150;
+export const MAX_ORD = 220;
 
 /** Räknar ord i brödtexten (före signatur). */
 export function antalOrd(text: string): number {
@@ -32,7 +36,7 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string): 
   if (/^\s*[-*•\d]+[.)]?\s/m.test(brodtext)) fel.push("innehåller punktlista");
   if (/[*_#>`]/.test(brodtext)) fel.push("innehåller formateringstecken");
   const ord = antalOrd(brodtext);
-  if (ord < 120 || ord > 180) fel.push(`brödtexten är ${ord} ord, ska vara 120 till 180`);
+  if (ord < MIN_ORD || ord > MAX_ORD) fel.push(`brödtexten är ${ord} ord, ska vara ${MIN_ORD} till ${MAX_ORD}`);
   if (amne.length > 50) fel.push(`ämnesraden är ${amne.length} tecken, högst 50`);
   if (amne.length < 10) fel.push("ämnesraden är för kort");
   if (amne === amne.toUpperCase() && /[A-ZÅÄÖ]/.test(amne)) fel.push("ämnesraden är skriven med versaler");
@@ -44,12 +48,35 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string): 
   for (const l of lankar) {
     const ren = l.replace(/^https?:\/\//, "").replace(/\/$/, "");
     const ok = tillatna.some((t) => ren === t.replace(/\/$/, "") || ren.startsWith(`${t.replace(/\/$/, "")}/`));
-    // Mottagarens egen domän får nämnas i löpande text, allt annat är otillåtet
     if (!ok && !/^[a-z0-9-]+\.(se|nu|com|org|net)$/.test(ren)) fel.push(`otillåten länk: ${l}`);
   }
   if (!/rkkommunikation\.se/i.test(brodtext)) fel.push("hänvisning till rkkommunikation.se saknas");
   if (/\b(du|dig|din|ditt|dina)\b/i.test(brodtext.replace(/\bdin webbplats\b/gi, ""))) fel.push("tilltalar med du i stället för ni");
   if (/\bAI\b|språkmodell|artificiell/i.test(brodtext)) fel.push("nämner AI");
+  if (/mätning saknas|statistik saknas|saknar\b[^.]{0,30}\b(mätning|statistik)|ingen mätning|ingen statistik|utan mätning/i.test(brodtext)) {
+    fel.push("påstår att mätning saknas, ska vara att inget mätverktyg syns");
+  }
+  return fel;
+}
+
+/** Regler från tillägget som kontrolleras med kod: fyndens djup, konkret förslag på egen rad, siffror. */
+export function tillaggsfel(brodtext: string, fynd: FyndRad[]): string[] {
+  const fel: string[] = [];
+  if (!fynd.some((f) => f.djup === 3)) fel.push("inget av fynden har djup 3");
+  if (fynd.filter((f) => f.djup === 1).length > 1) fel.push("fler än ett fynd med djup 1");
+  const forslag = fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x);
+  if (forslag.length === 0) fel.push("inget av fynden har ett konkret förslag");
+  else {
+    const rader = brodtext.split(/\r?\n/).map((r) => normaliseraText(r));
+    const finns = forslag.some((fo) => rader.includes(normaliseraText(fo)));
+    if (!finns) fel.push("det konkreta förslaget står inte ordagrant på en egen rad");
+  }
+  // Siffror i mejlet ska finnas i fynden (kodräknade mått), inte komma från modellen
+  const kalla = normaliseraText(fynd.map((f) => `${f.observation} ${f.insikt ?? ""} ${f.effekt} ${f.belagg_varde} ${f.belagg2_varde ?? ""} ${f.forslag_konkret ?? ""}`).join(" "));
+  const siffror = [...brodtext.replace(/rkkommunikation\.se|https?:\/\/\S+/g, "").matchAll(/\b\d+(?:[.,]\d+)?\b/g)].map((m) => m[0]);
+  for (const s of new Set(siffror)) {
+    if (!kalla.includes(s.toLowerCase()) && !kalla.includes(s.replace(",", "."))) fel.push(`siffran ${s} finns inte i fynden`);
+  }
   return fel;
 }
 
@@ -59,7 +86,7 @@ const GrindSchema = z.object({
   tonproblem: z.array(z.string()),
 });
 
-/** Kvalitetsgrind enligt avsnitt 9.5. */
+/** Kvalitetsgrind enligt avsnitt 9.5 i briefen och avsnitt 8 till 9 i tillägget. */
 export async function kvalitetsgrind(
   d: Db,
   p: Prospekt,
@@ -67,22 +94,19 @@ export async function kvalitetsgrind(
   fynd: FyndRad[],
   bra: { text: string }[],
   mottagare: string | null,
-  alt: { testlage?: boolean } = {},
+  alt: { testlage?: boolean; huvudinsikt?: string | null; profil?: string | null } = {},
 ): Promise<Grindresultat> {
   const k = konfig();
   const fel: string[] = [];
   const varningar: string[] = [];
 
   fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK));
+  fel.push(...tillaggsfel(utkast.brodtext, fynd));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);
-  if (!namnEllerDoman.some((n) => utkast.amne.toLowerCase().includes(n.toLowerCase()) || utkast.amne.toLowerCase().includes(n.toLowerCase().replace(/^www\./, "")))) {
+  if (!namnEllerDoman.some((n) => utkast.amne.toLowerCase().includes(n.toLowerCase().replace(/^www\./, "")))) {
     fel.push("ämnesraden innehåller varken organisationens namn eller domän");
   }
-  if (!utkast.brodtext.toLowerCase().includes(p.doman) && !(p.namn && utkast.brodtext.toLowerCase().includes(p.namn.toLowerCase()))) {
-    varningar.push("brödtexten nämner varken namn eller domän");
-  }
-
   if (fynd.length < 2 || fynd.length > 3) fel.push(`mejlet bygger på ${fynd.length} fynd, ska vara två eller tre`);
   if (fynd.some((f) => f.verifierad !== 1)) fel.push("ett eller flera fynd är inte verifierade");
 
@@ -105,8 +129,8 @@ export async function kvalitetsgrind(
       innehall: [
         {
           type: "text",
-          text: `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nFynd:\n${JSON.stringify(
-            fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, effekt: f.effekt, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde } })),
+          text: `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nHuvudinsikt:\n${alt.huvudinsikt ?? "(ingen)"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
+            fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, insikt: f.insikt, effekt: f.effekt, forslag_konkret: f.forslag_konkret, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde }, belagg2: f.belagg2_varde })),
             null,
             1,
           )}\n\nDet som fungerar bra:\n${JSON.stringify(bra.map((b) => b.text))}`,

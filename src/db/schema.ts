@@ -140,6 +140,22 @@ export const MIGRERINGAR: { namn: string; sql: string }[] = [
       );
     `,
   },
+  {
+    namn: "002_profil_huvudinsikt_djup",
+    sql: `
+      ALTER TABLE prospekt ADD COLUMN profil TEXT;
+      ALTER TABLE prospekt ADD COLUMN huvudinsikt TEXT;
+      ALTER TABLE fynd ADD COLUMN djup INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE fynd ADD COLUMN insikt TEXT;
+      ALTER TABLE fynd ADD COLUMN rotorsak TEXT;
+      ALTER TABLE fynd ADD COLUMN forslag_konkret TEXT;
+      ALTER TABLE fynd ADD COLUMN insats TEXT;
+      ALTER TABLE fynd ADD COLUMN kopplar_till_syfte INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE fynd ADD COLUMN belagg2_url TEXT;
+      ALTER TABLE fynd ADD COLUMN belagg2_typ TEXT;
+      ALTER TABLE fynd ADD COLUMN belagg2_varde TEXT;
+    `,
+  },
 ];
 
 export const PROSPEKT_STATUS = [

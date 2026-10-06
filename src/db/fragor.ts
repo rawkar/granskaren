@@ -14,6 +14,8 @@ export interface Prospekt {
   orsak_hoppad: string | null;
   skapad: string;
   granskad: string | null;
+  profil: string | null;
+  huvudinsikt: string | null;
 }
 
 export interface Sida {
@@ -62,6 +64,15 @@ export interface FyndRad {
   verifieringsmetod: string | null;
   verifieringsnot: string | null;
   skapad: string;
+  djup: number;
+  insikt: string | null;
+  rotorsak: string | null;
+  forslag_konkret: string | null;
+  insats: string | null;
+  kopplar_till_syfte: number;
+  belagg2_url: string | null;
+  belagg2_typ: string | null;
+  belagg2_varde: string | null;
 }
 
 export interface Kostnad {
@@ -138,7 +149,7 @@ export function sattStatus(d: Db, id: number, status: ProspektStatus, orsak?: st
 export function uppdateraProspekt(
   d: Db,
   id: number,
-  falt: Partial<Pick<Prospekt, "namn" | "organisationstyp" | "bransch" | "ort">>,
+  falt: Partial<Pick<Prospekt, "namn" | "organisationstyp" | "bransch" | "ort" | "profil" | "huvudinsikt">>,
 ): void {
   const nycklar = Object.keys(falt) as (keyof typeof falt)[];
   if (nycklar.length === 0) return;
@@ -214,8 +225,9 @@ export function sparaFynd(
   const r = d
     .prepare(
       `INSERT INTO fynd (prospekt_id, fynd_id, omrade, tjansteomrade, rubrik, observation, belagg_url,
-        belagg_typ, belagg_varde, effekt, atgard, allvar, sakerhet, latt_att_forklara)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        belagg_typ, belagg_varde, effekt, atgard, allvar, sakerhet, latt_att_forklara,
+        djup, insikt, rotorsak, forslag_konkret, insats, kopplar_till_syfte, belagg2_url, belagg2_typ, belagg2_varde)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       f.prospekt_id,
@@ -232,6 +244,15 @@ export function sparaFynd(
       f.allvar,
       f.sakerhet,
       f.latt_att_forklara,
+      f.djup,
+      f.insikt,
+      f.rotorsak,
+      f.forslag_konkret,
+      f.insats,
+      f.kopplar_till_syfte,
+      f.belagg2_url,
+      f.belagg2_typ,
+      f.belagg2_varde,
     );
   return Number(r.lastInsertRowid);
 }

@@ -17,34 +17,72 @@ export type Omrade = keyof typeof OMRADEN;
 export const BELAGG_TYPER = ["matvarde", "citat", "saknat_element", "skarmbild", "statuskod"] as const;
 export const TJANSTEOMRADEN = ["strategi", "innehall", "webb", "analys"] as const;
 export const ORGANISATIONSTYPER = ["forening", "stiftelse", "aktiebolag", "enskild_firma", "annat", "okand"] as const;
+export const INSATSER = ["liten", "medel", "stor"] as const;
 
-/** Schema för ett fynd, exakt enligt avsnitt 7.4 i briefen. */
+export const BelaggSchema = z.object({
+  url: z.string(),
+  typ: z.enum(BELAGG_TYPER),
+  varde: z.string(),
+});
+export type Belagg = z.infer<typeof BelaggSchema>;
+
+/** Schema för ett fynd: fälten från ursprungsbriefen plus djup, insikt, förslag och insats från tillägget. */
 export const FyndSchema = z.object({
   id: z.string(),
   omrade: z.enum(["A", "B", "C", "D", "E", "F", "G", "H", "I"]),
   tjansteomrade: z.enum(TJANSTEOMRADEN),
   rubrik: z.string(),
   observation: z.string(),
-  belagg: z.object({
-    url: z.string(),
-    typ: z.enum(BELAGG_TYPER),
-    varde: z.string(),
-  }),
+  belagg: BelaggSchema,
+  belagg2: BelaggSchema.nullable(),
   effekt: z.string(),
   atgard: z.string(),
   allvar: z.number(),
   sakerhet: z.number(),
   latt_att_forklara: z.number(),
+  djup: z.number(),
+  insikt: z.string(),
+  rotorsak: z.string().nullable(),
+  forslag_konkret: z.string().nullable(),
+  insats: z.enum(INSATSER),
+  kopplar_till_syfte: z.boolean(),
 });
 export type Fynd = z.infer<typeof FyndSchema>;
+
+const ProfilPunkt = z.object({
+  varde: z.string(),
+  sakerhet: z.number(),
+  belagg: z.string().nullable(),
+  gissning: z.boolean(),
+});
+
+export const ProfilSchema = z.object({
+  vad_de_gor: ProfilPunkt,
+  for_vem: ProfilPunkt,
+  omrade: ProfilPunkt,
+  syfte: ProfilPunkt,
+  huvudhandling: ProfilPunkt,
+  skiljer_sig: ProfilPunkt,
+  ton: ProfilPunkt,
+});
+export type Profil = z.infer<typeof ProfilSchema>;
+
+export const HuvudinsiktSchema = z.object({
+  text: z.string(),
+  fynd_ids: z.array(z.string()),
+});
+export type Huvudinsikt = z.infer<typeof HuvudinsiktSchema>;
 
 export const AnalysSchema = z.object({
   organisationstyp: z.enum(ORGANISATIONSTYPER),
   organisationsnamn: z.string().nullable(),
+  profil: ProfilSchema,
   sammanfattning: z.string(),
   valskott: z.boolean(),
   bra: z.array(z.object({ text: z.string(), url: z.string().nullable() })),
   fynd: z.array(FyndSchema),
+  huvudinsikt: HuvudinsiktSchema.nullable(),
+  borja_med: z.array(z.object({ atgard: z.string(), insats: z.enum(INSATSER), effekt: z.string() })),
 });
 export type Analys = z.infer<typeof AnalysSchema>;
 
@@ -61,7 +99,9 @@ export function stadaFynd(f: Fynd): Fynd {
     ...f,
     allvar: heltal(f.allvar, 1, 3),
     latt_att_forklara: heltal(f.latt_att_forklara, 1, 3),
+    djup: heltal(f.djup, 1, 3),
     sakerhet: Math.min(1, Math.max(0, f.sakerhet)),
-    tjansteomrade: f.tjansteomrade,
+    forslag_konkret: f.forslag_konkret?.trim() || null,
+    rotorsak: f.rotorsak?.trim() || null,
   };
 }

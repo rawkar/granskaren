@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { avkoda, hittaAdresser, utvinnKontakter } from "../src/email/kontakter.js";
 import { valjFynd } from "../src/email/val.js";
-import { antalOrd, sprakfel } from "../src/email/grind.js";
+import { antalOrd, sprakfel, tillaggsfel } from "../src/email/grind.js";
 import type { FyndRad } from "../src/db/fragor.js";
 
 describe("adressutvinning", () => {
@@ -42,81 +42,115 @@ function fynd(delar: Partial<FyndRad>): FyndRad {
     id: 0, prospekt_id: 1, fynd_id: "f", omrade: "D", tjansteomrade: "webb", rubrik: "r", observation: "o",
     belagg_url: "https://exempel.se/", belagg_typ: "saknat_element", belagg_varde: "h1", effekt: "e", atgard: "a",
     allvar: 2, sakerhet: 0.9, latt_att_forklara: 2, verifierad: 1, verifieringsmetod: "kod", verifieringsnot: null, skapad: "",
+    djup: 2, insikt: "i", rotorsak: null, forslag_konkret: null, insats: "liten", kopplar_till_syfte: 1,
+    belagg2_url: null, belagg2_typ: null, belagg2_varde: null,
     ...delar,
   };
 }
 
 describe("val av fynd", () => {
-  it("tar aldrig med obekräftade fynd", () => {
-    const v = valjFynd([
-      fynd({ fynd_id: "a", verifierad: 0, allvar: 3, latt_att_forklara: 3 }),
-      fynd({ fynd_id: "b", verifierad: 1 }),
-      fynd({ fynd_id: "c", verifierad: 1, belagg_url: "https://exempel.se/kontakt" }),
-    ]);
-    expect(v.map((f) => f.fynd_id)).not.toContain("a");
-    expect(v).toHaveLength(2);
+  const hi = { text: "Huvudinsikt", fynd_ids: ["djup3", "titel"] };
+
+  it("ger inget mejl utan huvudinsikt eller utan fynd med djup 3", () => {
+    expect(valjFynd([fynd({ fynd_id: "djup3", djup: 3 }), fynd({ fynd_id: "titel", djup: 1 })], null).orsak).toBe("ingen huvudinsikt");
+    expect(valjFynd([fynd({ fynd_id: "djup3", djup: 2 }), fynd({ fynd_id: "titel", djup: 1 })], hi).orsak).toBe("inget bekräftat fynd med djup 3");
   });
-  it("ger tom lista vid färre än två bekräftade", () => {
-    expect(valjFynd([fynd({ verifierad: 1 }), fynd({ verifierad: 0 })])).toEqual([]);
-    expect(valjFynd([fynd({ sakerhet: 0.5 }), fynd({ sakerhet: 0.9 })])).toEqual([]);
+  it("tar aldrig med obekräftade fynd eller fynd utanför syftet", () => {
+    const v = valjFynd(
+      [
+        fynd({ fynd_id: "djup3", djup: 3, verifierad: 0, forslag_konkret: "x" }),
+        fynd({ fynd_id: "titel", djup: 1, forslag_konkret: "Ny titel" }),
+        fynd({ fynd_id: "annat", djup: 3, kopplar_till_syfte: 0 }),
+      ],
+      hi,
+    );
+    expect(v.fynd).toEqual([]);
+    expect(v.orsak).toBe("inget bekräftat fynd med djup 3");
   });
-  it("prioriterar ett mänskligt fynd och spridning över tjänsteområden", () => {
-    const v = valjFynd([
-      fynd({ fynd_id: "seo1", omrade: "D", tjansteomrade: "webb", allvar: 3, latt_att_forklara: 3 }),
-      fynd({ fynd_id: "seo2", omrade: "D", tjansteomrade: "webb", allvar: 3, latt_att_forklara: 3, belagg_url: "https://exempel.se/om" }),
-      fynd({ fynd_id: "seo3", omrade: "E", tjansteomrade: "webb", allvar: 3, latt_att_forklara: 3 }),
-      fynd({ fynd_id: "budskap", omrade: "A", tjansteomrade: "strategi", allvar: 1, latt_att_forklara: 1, sakerhet: 0.75 }),
-      fynd({ fynd_id: "matning", omrade: "I", tjansteomrade: "analys", allvar: 1, latt_att_forklara: 1 }),
-    ]);
-    const ids = v.map((f) => f.fynd_id);
-    expect(ids).toContain("budskap");
-    expect(ids).toContain("seo1");
-    expect(v).toHaveLength(3);
-    expect(new Set(v.map((f) => f.tjansteomrade)).size).toBeGreaterThanOrEqual(2);
+  it("väljer djup 3 som stöder huvudinsikten, högst ett djup 1, och ett med konkret förslag", () => {
+    const v = valjFynd(
+      [
+        fynd({ fynd_id: "titel", djup: 1, forslag_konkret: "Grafisk identitet för företag i Västerås", belagg_url: "https://exempel.se/" }),
+        fynd({ fynd_id: "titel2", djup: 1, omrade: "D", belagg_url: "https://exempel.se/om" }),
+        fynd({ fynd_id: "djup3", djup: 3, omrade: "A", tjansteomrade: "strategi", belagg_url: "https://exempel.se/" }),
+        fynd({ fynd_id: "formular", djup: 2, omrade: "H", belagg_url: "https://exempel.se/kontakt" }),
+      ],
+      hi,
+    );
+    expect(v.orsak).toBeNull();
+    const ids = v.fynd.map((f) => f.fynd_id);
+    expect(ids).toContain("djup3");
+    expect(ids).toContain("titel");
+    expect(ids).not.toContain("titel2");
+    expect(v.fynd.filter((f) => f.djup === 1)).toHaveLength(1);
+    expect(v.fynd.some((f) => f.forslag_konkret)).toBe(true);
+    expect(v.fynd.length).toBeLessThanOrEqual(3);
   });
 });
 
 describe("språkregler i kvalitetsgrinden", () => {
   const ok = `Hej,
 
-Jag heter Rawaz Karim och arbetar som kommunikationskonsult med föreningar och mindre organisationer. Jag har tittat på er webbplats och fastnade för tre saker som jag tror skulle göra skillnad för er.
+Jag heter Rawaz Karim och arbetar som kommunikationskonsult. Jag har gått igenom er webbplats och ser en byrå som gör genomarbetade identiteter åt lokala företag, men sajten berättar det sämre än arbetet förtjänar.
 
-Startsidan berättar inte vad ni gör förrän en bit ner på sidan. En mening högst upp om vilka ni är och vem ni finns till för gör att fler besökare stannar kvar och förstår vad ni erbjuder.
+Era sex kundcase visar vad ni har gjort men aldrig vad kunden fick ut av det. Den som väljer mellan er och en annan byrå letar efter just det, och ett par meningar om resultatet i varje case skulle göra stor skillnad för hur ni uppfattas.
 
-Sidan Bli medlem saknar den beskrivning som syns i Googles sökresultat, så Google väljer själv ett textutdrag. Med en egen beskrivning blir det tydligare varför man ska klicka och fler hittar rätt.
+Samma sak syns i sök. Startsidans titel börjar med ordet Start, så Google får ingen hjälp att förstå vad ni erbjuder. Ett exempel på hur den skulle kunna lyda
 
-I mobilen tar startsidan drygt sex sekunder att ladda, främst på grund av stora bilder. Med komprimerade bilder går det betydligt snabbare och färre tröttnar innan sidan visas.
+Grafisk identitet och webb för företag i Västerås | Exempelbyrån
 
-Jag hjälper gärna till med detta om ni vill. På rkkommunikation.se kan ni läsa mer om vad jag gör. Svara gärna på det här mejlet om ni vill ta ett första samtal, så hittar vi en tid som passar er.
+Kontaktformuläret har dessutom nio fält, vilket brukar få en del att ge upp på vägen. Namn, mejl och en rad om uppdraget räcker för ett första samtal och ni kan alltid fråga mer senare.
+
+Jag hjälper gärna till med detta. Mer om vad jag gör finns på rkkommunikation.se. Svara gärna på det här mejlet om ni vill boka ett första möte, så hittar vi en tid som passar er.
 
 Vänliga hälsningar`;
 
+  const fyndOk = [
+    fynd({ fynd_id: "case", djup: 3, observation: "Sex kundcase visar vad som gjordes men inte resultatet." }),
+    fynd({ fynd_id: "titel", djup: 1, forslag_konkret: "Grafisk identitet och webb för företag i Västerås | Exempelbyrån" }),
+    fynd({ fynd_id: "formular", djup: 2, observation: "Kontaktformuläret har 9 fält.", belagg_varde: "matt.formular_1_falt=9" }),
+  ];
+
   it("godkänner ett korrekt mejl", () => {
-    expect(antalOrd(ok)).toBeGreaterThanOrEqual(120);
-    expect(sprakfel("Tre saker jag såg på exempelforeningen.se", ok, "")).toEqual([]);
+    expect(antalOrd(ok)).toBeGreaterThanOrEqual(150);
+    expect(antalOrd(ok)).toBeLessThanOrEqual(220);
+    expect(sprakfel("Era case på exempelbyran.se säljer er under värde", ok, "")).toEqual([]);
+    expect(tillaggsfel(ok, fyndOk)).toEqual([]);
   });
   it("stoppar tankstreck, kolon, utropstecken, längd och ämnesrad", () => {
-    expect(sprakfel("Hej exempel.se", ok.replace("sökresultat, så", "sökresultat – så"), "")).toContain("innehåller tankstreck");
+    expect(sprakfel("Hej exempel.se", ok.replace("det, och", "det – och"), "")).toContain("innehåller tankstreck");
     expect(sprakfel("Hej: exempel.se", ok, "")).toContain("ämnesraden innehåller kolon");
     expect(sprakfel("Hej exempel.se", `${ok}\nTack!`, "")).toContain("innehåller utropstecken");
-    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "")[0]).toMatch(/ord, ska vara 120 till 180/);
+    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "")[0]).toMatch(/ord, ska vara 150 till 220/);
     expect(sprakfel("En alldeles för lång ämnesrad som går långt över femtio tecken exempel.se", ok, "")).toContain(
       "ämnesraden är 73 tecken, högst 50",
     );
     expect(sprakfel("TRE SAKER PÅ EXEMPEL.SE", ok, "")).toContain("ämnesraden är skriven med versaler");
   });
-  it("stoppar främmande länkar, du-tilltal, punktlistor och AI-omnämnande", () => {
+  it("stoppar främmande länkar, du-tilltal, punktlistor, AI och påståendet att mätning saknas", () => {
     expect(sprakfel("Hej exempel.se", ok.replace("rkkommunikation.se", "rkkommunikation.se och https://annan.se/sida"), "")).toContain(
       "otillåten länk: https://annan.se/sida",
     );
     expect(sprakfel("Hej exempel.se", ok.replace("er webbplats", "din webbplats och dina sidor"), "")).toContain("tilltalar med du i stället för ni");
-    expect(sprakfel("Hej exempel.se", ok.replace("Startsidan berättar", "- Startsidan berättar"), "")).toContain("innehåller punktlista");
-    expect(sprakfel("Hej exempel.se", ok.replace("mina granskningsverktyg", "AI"), "").length).toBeGreaterThanOrEqual(0);
-    expect(sprakfel("Hej exempel.se", `${ok.replace("Jag har tittat", "Med hjälp av AI har jag tittat")}`, "")).toContain("nämner AI");
+    expect(sprakfel("Hej exempel.se", ok.replace("Era sex kundcase", "- Era sex kundcase"), "")).toContain("innehåller punktlista");
+    expect(sprakfel("Hej exempel.se", ok.replace("Jag har gått igenom", "Med hjälp av AI har jag gått igenom"), "")).toContain("nämner AI");
+    expect(sprakfel("Hej exempel.se", ok.replace("Samma sak syns i sök.", "Dessutom saknar sajten mätning."), "")).toContain(
+      "påstår att mätning saknas, ska vara att inget mätverktyg syns",
+    );
   });
   it("tillåter bokningslänken när den är konfigurerad", () => {
     const text = ok.replace("så hittar vi en tid som passar er.", "eller boka direkt på cal.com/rawaz.");
     expect(sprakfel("Hej exempel.se", text, "")).toContain("otillåten länk: cal.com/rawaz");
     expect(sprakfel("Hej exempel.se", text, "https://cal.com/rawaz")).toEqual([]);
+  });
+  it("kräver djup 3, konkret förslag på egen rad och siffror ur fynden", () => {
+    expect(tillaggsfel(ok, fyndOk.map((f) => ({ ...f, djup: Math.min(f.djup, 2) })))).toContain("inget av fynden har djup 3");
+    expect(tillaggsfel(ok, fyndOk.map((f) => ({ ...f, forslag_konkret: null })))).toContain("inget av fynden har ett konkret förslag");
+    expect(tillaggsfel(ok.replace("\n\nGrafisk identitet och webb för företag i Västerås | Exempelbyrån\n\n", " "), fyndOk)).toContain(
+      "det konkreta förslaget står inte ordagrant på en egen rad",
+    );
+    expect(tillaggsfel(ok.replace("nio fält", "12 fält"), fyndOk)).toContain("siffran 12 finns inte i fynden");
+    expect(tillaggsfel(ok.replace("nio fält", "9 fält"), fyndOk)).toEqual([]);
+    expect(tillaggsfel(ok, [...fyndOk, fynd({ fynd_id: "x", djup: 1 })])).toContain("fler än ett fynd med djup 1");
   });
 });
