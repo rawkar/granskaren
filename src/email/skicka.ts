@@ -52,9 +52,12 @@ export function lokalTid(d: Date): string {
   return `${lokaltDatum(d)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/** Slumpad paus mellan mejl, 4 till 15 minuter. */
+/** Slumpad paus mellan mejl, mellan PAUS_MIN_MINUTER och PAUS_MAX_MINUTER (standard 4 till 15). */
 export function slumpadPausMs(): number {
-  return (4 + Math.random() * 11) * 60 * 1000;
+  const k = konfig();
+  const min = Math.max(1, k.PAUS_MIN_MINUTER);
+  const max = Math.max(min, k.PAUS_MAX_MINUTER);
+  return (min + Math.random() * (max - min)) * 60 * 1000;
 }
 
 export function nyttMessageId(avsandare: string): string {
@@ -177,6 +180,36 @@ export interface SandAlternativ {
   pausMs?: () => number; // för tester
 }
 
+/** Skickar ett enskilt köat mejl, eller skriver det till torrkörning. Förutsätter att hinder() är kontrollerad. */
+export async function skickaEtt(d: Db, m: MejlRad): Promise<"skickad" | "torrkord" | "stoppad"> {
+  const k = konfig();
+  const p = hamtaProspekt(d, m.prospekt_id);
+  const messageId = m.message_id ?? nyttMessageId(k.AVSANDARE_EPOST || k.SMTP_USER);
+  const brev: Brev = { till: m.mottagare!, amne: m.amne, text: m.text, messageId, inReplyTo: m.in_reply_to };
+  if (k.TORRKORNING) {
+    const fil = skrivTorrkorning(brev, p?.doman ?? String(m.prospekt_id));
+    d.prepare("UPDATE mejl SET status = 'torrkord', message_id = ?, skickad = ? WHERE id = ?").run(messageId, lokalTid(new Date()), m.id);
+    loggaHandelse(d, m.prospekt_id, "torrkorning", { fil, mottagare: m.mottagare });
+    logg.info(`   torrkörning: ${p?.doman} -> ${fil}`);
+    return "torrkord";
+  }
+  // Spärrlistan kontrolleras i samma ögonblick som mejlet skickas
+  if (arSparrad(d, m.mottagare!) || (p && arSparrad(d, p.doman))) return "stoppad";
+  const id = await skickaBrev(k, brev);
+  const tid = lokalTid(new Date());
+  d.prepare("UPDATE mejl SET status = 'skickad', message_id = ?, skickad = ? WHERE id = ?").run(id, tid, m.id);
+  sattStatus(d, m.prospekt_id, "skickad");
+  const kopia = skrivKopia({ ...brev, messageId: id }, p?.doman ?? String(m.prospekt_id), tid);
+  loggaHandelse(d, m.prospekt_id, "skickat", { mottagare: m.mottagare, message_id: id, amne: m.amne, fynd: JSON.parse(m.anvanda_fynd), kopia });
+  logg.info(`   skickat till ${m.mottagare} (${p?.doman}), Message-ID ${id}`);
+  return "skickad";
+}
+
+/** Nästa köade mejl, eller undefined. */
+export function nastaKoade(d: Db): MejlRad | undefined {
+  return d.prepare("SELECT * FROM mejl WHERE status = 'koad' ORDER BY id LIMIT 1").get() as MejlRad | undefined;
+}
+
 /** Skickar köade mejl inom tidsfönster och dagligt tak, med slumpad paus mellan. */
 export async function skickaKoade(d: Db, alt: SandAlternativ = {}): Promise<{ skickade: number; torrkorda: number; stoppade: number }> {
   const k = konfig();
@@ -204,28 +237,12 @@ export async function skickaKoade(d: Db, alt: SandAlternativ = {}): Promise<{ sk
       await paus(ms);
       if (hinder(d, k, m)) continue; // kontrollera igen efter pausen
     }
-    const messageId = m.message_id ?? nyttMessageId(k.AVSANDARE_EPOST || k.SMTP_USER);
-    const brev: Brev = { till: m.mottagare!, amne: m.amne, text: m.text, messageId, inReplyTo: m.in_reply_to };
-    if (k.TORRKORNING) {
-      const fil = skrivTorrkorning(brev, p?.doman ?? String(m.prospekt_id));
-      d.prepare("UPDATE mejl SET status = 'torrkord', message_id = ?, skickad = ? WHERE id = ?").run(messageId, lokalTid(new Date()), m.id);
-      loggaHandelse(d, m.prospekt_id, "torrkorning", { fil, mottagare: m.mottagare });
-      logg.info(`   torrkörning: ${p?.doman} -> ${fil}`);
-      res.torrkorda++;
-    } else {
-      // Spärrlistan kontrolleras i samma ögonblick som mejlet skickas
-      if (arSparrad(d, m.mottagare!) || (p && arSparrad(d, p.doman))) {
-        res.stoppade++;
-        continue;
-      }
-      const id = await skickaBrev(k, brev);
-      const tid = lokalTid(new Date());
-      d.prepare("UPDATE mejl SET status = 'skickad', message_id = ?, skickad = ? WHERE id = ?").run(id, tid, m.id);
-      sattStatus(d, m.prospekt_id, "skickad");
-      const kopia = skrivKopia({ ...brev, messageId: id }, p?.doman ?? String(m.prospekt_id), tid);
-      loggaHandelse(d, m.prospekt_id, "skickat", { mottagare: m.mottagare, message_id: id, amne: m.amne, fynd: JSON.parse(m.anvanda_fynd), kopia });
-      logg.info(`   skickat till ${m.mottagare} (${p?.doman}), Message-ID ${id}`);
-      res.skickade++;
+    const utfall = await skickaEtt(d, m);
+    if (utfall === "skickad") res.skickade++;
+    else if (utfall === "torrkord") res.torrkorda++;
+    else {
+      res.stoppade++;
+      continue;
     }
     antal++;
   }

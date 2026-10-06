@@ -58,6 +58,12 @@ const schema = z.object({
   UPPFOLJNING_AKTIV: bool,
   UPPFOLJNING_EFTER_ARBETSDAGAR: heltal(7),
 
+  /** Paus mellan mejl i minuter, slumpas mellan min och max. */
+  PAUS_MIN_MINUTER: heltal(4),
+  PAUS_MAX_MINUTER: heltal(15),
+  /** Hur många nya prospekt run letar upp åt gången när kön är tom. */
+  DISCOVER_ANTAL: heltal(10),
+
   MAX_SIDOR_PER_SAJT: heltal(8),
   PAUS_MELLAN_SIDOR_MS: heltal(2000),
 });

@@ -38,6 +38,7 @@ Kör med `npm run granskaren -- <kommando>` eller, efter `npm link`, bara `grans
 | `weekly [--justera]` | Veckorapport per kundtyp och förslag på ny fördelning utifrån svar. Ingen typ går under minsta andel. |
 | `send [--max N]` | Skickar köade mejl (status `koad`) på vardagar inom sändfönstret, högst `MAX_MEJL_PER_DAG` per dag, med 4 till 15 minuters paus mellan. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. |
 | `send --test-till du@exempel.se [--doman x.se]` | Skickar ett utkast som test till din egen adress. Går runt torrkörning, fönster och tak, men rör inte kön. |
+| `run [--en-gang] [--utan-discover]` | Helautomatisk dag. Skickar nästa köade mejl, fyller på kön genom att granska och skriva utkast för nästa prospekt, letar nya prospekt med discover när inga finns kvar, och pausar slumpat mellan mejlen tills `MAX_MEJL_PER_DAG` är nått eller sändfönstret stänger. |
 | `skickade [--doman x.se]` | Listar mejl som faktiskt har skickats i skarpt läge. Med `--doman` visas hela mejlet. Testmejl och torrkörningar räknas inte. En kopia av varje skickat mejl ligger också i `data/skickade/`. |
 | `report <domän>` | Skriver ut rapporten för en sajt. |
 | `status` | Visar prospekt per status, mätpunkter och kostnad. |
@@ -54,6 +55,20 @@ Varje fynd har ett djup. 1 betyder att ett verktyg hittar det, 2 kräver tolknin
 Siffror som används i fynd och mejl kommer från kodräknade mått i `data/underlag/<domän>.json` under `matt`: andel vi-ord mot ni-ord, läsbarhetsindex LIX, antal formulärfält per formulär, antal case och plattform. Modellen räknar aldrig själv.
 
 Filen `prompts/rawaz-perspektiv.md` är din. Fyll i den med dina principer och vanligaste iakttagelser, så vägs de in i analysen. Den är frivillig och tom från början.
+
+## Daglig körning utan handpåläggning
+
+`bin/kor-dagligen.cmd` startar `run` och skriver loggen till `data/logg/run-<datum>.log`. En uppgift i Windows Schemaläggaren med namnet "Granskaren dagligt utskick" kör skriptet varje vardag 08:30, och även i efterhand om datorn var avstängd då. Datorn måste vara på och du inloggad. Skapa eller återställ uppgiften i PowerShell:
+
+```
+$proj = "C:\sökväg\till\Granskaren"
+$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$proj\bin\kor-dagligen.cmd`"" -WorkingDirectory $proj
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 08:30
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 10) -MultipleInstances IgnoreNew -RunOnlyIfNetworkAvailable
+Register-ScheduledTask -TaskName "Granskaren dagligt utskick" -Action $action -Trigger $trigger -Settings $settings -Force
+```
+
+Ta bort den med `Unregister-ScheduledTask -TaskName "Granskaren dagligt utskick"`. Taket per dag, pauserna och sändfönstret styrs i `.env`. För att allt ska gå utan att du godkänner utkast behöver `SANDLAGE=auto` och `MIN_SAKERHET_AUTO` ligga på en nivå som utkasten når, annars hamnar de i granskningskön.
 
 ## Mejlutkast och kvalitetsgrind
 

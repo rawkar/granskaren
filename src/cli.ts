@@ -13,6 +13,7 @@ import { profileraForebilder } from "./discover/forebilder.js";
 import { allaSegment, skapaSegment } from "./discover/segment.js";
 import { discover } from "./discover/discover.js";
 import { utfallPerKundtyp, weekly } from "./report/weekly.js";
+import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
 
@@ -222,6 +223,16 @@ program
     }
     const r = await skickaKoade(d, { max: o.max ? Number.parseInt(o.max, 10) : undefined });
     logg.info(`Klart. Skickade: ${r.skickade}, torrkörda: ${r.torrkorda}, stoppade: ${r.stoppade}`);
+  });
+
+program
+  .command("run")
+  .description("Helautomatisk dag: letar prospekt, granskar, skriver utkast och skickar med slumpade pauser tills taket eller fönstret är nått")
+  .option("--en-gang", "kör ett varv och avsluta", false)
+  .option("--utan-discover", "leta inte nya prospekt", false)
+  .action(async (o: { enGang: boolean; utanDiscover: boolean }) => {
+    konfig();
+    await run(db(), { enGang: o.enGang, utanDiscover: o.utanDiscover });
   });
 
 program
