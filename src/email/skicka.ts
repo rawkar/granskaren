@@ -71,6 +71,7 @@ export function hinder(d: Db, k: Konfig, m: MejlRad, nu = new Date()): string | 
   if (arSparrad(d, m.mottagare)) return "mottagaren finns på spärrlistan";
   const p = hamtaProspekt(d, m.prospekt_id);
   if (!p) return "prospektet saknas";
+  if (p.status === "hoppad" || p.status === "sparrad") return `prospektet är ${p.status}${p.orsak_hoppad ? ` (${p.orsak_hoppad})` : ""}`;
   if (arSparrad(d, p.doman)) return "domänen finns på spärrlistan";
   if (m.typ === "forsta") {
     const redan = d.prepare("SELECT 1 FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status = 'skickad' AND id != ?").get(m.prospekt_id, m.id);

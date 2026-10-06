@@ -37,6 +37,8 @@ export interface ForfilterResultat {
 
 const STOR_ORGANISATION = /presskontakt|pressansvarig|presschef|pressekreterare|kommunikationschef|kommunikationsavdelning|kommunikationsdirekt[oö]r|kommunikationsenhet|marknadschef/i;
 const OFFENTLIG = /\b(kommun|region|myndighet|landsting|statlig|förvaltning)\b/i;
+/** Konkurrenter: den som själv säljer kommunikation, webb, marknadsföring eller reklam, även som enskild konsult. */
+const KONKURRENT = /kommunikat|webbyr|webbyrå|marknadsf[oö]ring|reklambyr|pr-?byr|content ?byr|seo-?byr|digital ?byr|copywrit/i;
 
 /** Kodbaserade skäl som avgörs utan modell. Returnerar orsak eller null. */
 export function kodskal(d: Db, doman: string, sajt: EnkelSajt): string | null {
@@ -87,6 +89,7 @@ export async function forfiltrera(d: Db, kp: Kundprofil, t: Traff, sajt: EnkelSa
   if (!svar.passar || !kundtyp) skal.push("passar ingen kundtyp");
   if (svar.offentlig || OFFENTLIG.test(svar.namn ?? "")) skal.push("offentlig verksamhet");
   if (svar.saljer_webb_eller_kommunikation) skal.push("säljer själv webb eller kommunikation");
+  else if (KONKURRENT.test(t.doman) || KONKURRENT.test(svar.yrke ?? "")) skal.push(`säljer själv kommunikation eller webb (${KONKURRENT.exec(t.doman)?.[0] ?? svar.yrke})`);
   if (kundtyp && kundtyp !== 1) {
     if (svar.egen_kommunikationsfunktion || STOR_ORGANISATION.test(sajt.text)) skal.push("egen kommunikationsfunktion");
     if (!svar.har_personal) skal.push("ingen personal utöver en enskild person");
