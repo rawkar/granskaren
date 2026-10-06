@@ -37,13 +37,21 @@ export function hittaAdresser(html: string, text: string): string[] {
       if (giltig(adr)) funna.add(adr);
     }
   });
-  // data-attribut och Cloudflare-skydd hanteras inte, bara synlig text
-  const avkodad = avkoda(`${text}\n${$("body").text()}`);
-  for (const m of avkodad.matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)) {
-    const adr = m[0].toLowerCase().replace(/^[._-]+|[._-]+$/g, "");
+  // Textnoder skiljs med mellanslag så att "Mejl" och adressen inte limmas ihop till en felaktig adress
+  const textnoder: string[] = [];
+  $("body *")
+    .contents()
+    .each((_, n) => {
+      if (n.type === "text") textnoder.push((n as { data?: string }).data ?? "");
+    });
+  const avkodad = avkoda(`${text}\n${textnoder.join(" ")}`);
+  for (const m of avkodad.matchAll(/(^|[\s<>("'“”‘’,;:|])([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/gi)) {
+    const adr = m[2].toLowerCase().replace(/^[._-]+|[._-]+$/g, "");
     if (giltig(adr)) funna.add(adr);
   }
-  return [...funna];
+  // En adress som bara är en annan med extra tecken framför (t.ex. "ntimo@..." mot "timo@...") är ett hoplimningsfel
+  const lista = [...funna];
+  return lista.filter((a) => !lista.some((b) => b !== a && a.endsWith(b) && a.length > b.length));
 }
 
 export function giltig(adr: string): boolean {
@@ -96,6 +104,8 @@ export function utvinnKontakter(
 export function sparaKontakter(d: Db, prospektId: number, kontakter: Kontakt[]): void {
   const ins = d.prepare("INSERT OR REPLACE INTO kontakter (prospekt_id, adress, typ, kallsida, prioritet) VALUES (?, ?, ?, ?, ?)");
   d.transaction(() => {
+    // Gamla rader tas bort så att en tidigare felaktig utvinning inte ligger kvar
+    d.prepare("DELETE FROM kontakter WHERE prospekt_id = ?").run(prospektId);
     for (const k of kontakter) ins.run(prospektId, k.adress, k.typ, k.kallsida, k.prioritet);
   })();
 }

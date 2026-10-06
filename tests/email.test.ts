@@ -18,6 +18,14 @@ describe("adressutvinning", () => {
     expect(adr).not.toContain("noreply@exempel.se");
     expect(adr.some((a) => a.endsWith(".png"))).toBe(false);
   });
+  it("limmar inte ihop text före adressen och tar bort hoplimmade varianter", () => {
+    const html = `<p>Mejl</p><p>timo.westergard@hotmail.com</p><div><span>Kontakt</span><span>info@exempel.se</span></div>`;
+    const adr = hittaAdresser(html, "Mejl\ntimo.westergard@hotmail.com\nKontaktinfo@exempel.se");
+    expect(adr).toContain("timo.westergard@hotmail.com");
+    expect(adr).toContain("info@exempel.se");
+    expect(adr).not.toContain("mejltimo.westergard@hotmail.com");
+    expect(adr).not.toContain("kontaktinfo@exempel.se");
+  });
   it("prioriterar funktionsadress före person och egen domän före gmail", () => {
     const k = utvinnKontakter("exempel.se", [
       { roll: "om", url: "https://exempel.se/om", html: '<a href="mailto:anna.b@exempel.se">Anna</a>', text: "Anna" },
