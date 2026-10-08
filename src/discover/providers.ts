@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { anthropic, lasPrompt, loggaAnvandning } from "../analyze/klient.js";
+import { anthropic, kontrolleraKostnadstak, lasPrompt, loggaAnvandning } from "../analyze/klient.js";
 import { konfig } from "../config.js";
 import type { Db } from "../db/index.js";
 import { normaliseraDoman } from "../util/domain.js";
@@ -50,15 +50,21 @@ export class WebbSokning implements SearchProvider {
     const tools: Anthropic.ToolUnion[] = [
       { type: "web_search_20260209", name: "web_search", max_uses: maxSok, user_location: { type: "approximate", country: "SE", timezone: "Europe/Stockholm" } },
     ];
+    kontrolleraKostnadstak(d);
     let svar = await client.messages.create({ model: k.MODEL_ANALYS, max_tokens: 8000, system: lasPrompt("discover-webb"), messages, tools });
     loggaAnvandning(d, null, "discover_webb", k.MODEL_ANALYS, svar.usage);
     for (let i = 0; i < 4 && svar.stop_reason === "pause_turn"; i++) {
       messages.push({ role: "assistant", content: svar.content });
+      kontrolleraKostnadstak(d);
       svar = await client.messages.create({ model: k.MODEL_ANALYS, max_tokens: 8000, system: lasPrompt("discover-webb"), messages, tools });
       loggaAnvandning(d, null, "discover_webb", k.MODEL_ANALYS, svar.usage);
     }
     if (svar.stop_reason === "refusal") throw new Error("Modellen avböjde sökningen.");
     const text = svar.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n");
+    if (process.env.GRANSKAREN_DEBUG) {
+      const sokningar = svar.content.filter((b) => b.type === "server_tool_use").length;
+      logg.info(`   [debug] stop_reason ${svar.stop_reason}, ${sokningar} sökningar i sista svaret, modellens text:\n${text.slice(0, 3000)}`);
+    }
     const block = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text.match(/\[[\s\S]*\]/)?.[0];
     if (!block) {
       logg.varning("   webbsökningen gav ingen JSON-lista");

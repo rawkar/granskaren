@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { KostnadstakError, kostnadstak } from "./analyze/klient.js";
 import { granskaProspekt } from "./audit.js";
 import { DATA_DIR, konfig } from "./config.js";
 import type { Db } from "./db/index.js";
@@ -70,11 +71,19 @@ async function runInre(d: Db, alt: RunAlternativ): Promise<void> {
   const k = konfig();
   logg.info(`run startar. Läge ${k.SANDLAGE}, torrkörning ${k.TORRKORNING ? "PÅ" : "av"}, tak ${k.MAX_MEJL_PER_DAG} per dag, fönster ${k.SANDFONSTER_START} till ${k.SANDFONSTER_SLUT}, paus ${k.PAUS_MIN_MINUTER} till ${k.PAUS_MAX_MINUTER} minuter.`);
   if (k.SANDLAGE !== "auto") logg.varning("SANDLAGE är granska. Utkast hamnar i granskningskön och inget skickas förrän du godkänner dem.");
+  const takVidStart = kostnadstak(d);
+  if (takVidStart) logg.info(`Kostnadstak: ${takVidStart.forbrukat.toFixed(2)} av ${takVidStart.tak.toFixed(2)} USD förbrukat den här månaden.`);
+  else logg.varning("MAX_KOSTNAD_PER_MANAD är inte satt i .env, inget kostnadstak.");
 
   let varv = 0;
   let felIRad = 0;
   for (;;) {
     varv++;
+    const tak = kostnadstak(d);
+    if (tak?.natt) {
+      logg.fel(`Månadens kostnadstak på ${tak.tak.toFixed(2)} USD är nått (${tak.forbrukat.toFixed(2)} USD). Avbryter körningen.`);
+      break;
+    }
     const nu = new Date();
     if (!arVardag(nu)) {
       logg.info("Inte en vardag, inget skickas.");
@@ -119,6 +128,10 @@ async function runInre(d: Db, alt: RunAlternativ): Promise<void> {
       logg.info(`   pausar ${Math.round(ms / 60000)} minuter (${kvar - 1} kvar i dag)`);
       await paus(ms);
     } catch (e) {
+      if (e instanceof KostnadstakError) {
+        logg.fel(`${e.message} Avbryter körningen.`);
+        break;
+      }
       felIRad++;
       logg.fel(`varv ${varv}: ${e instanceof Error ? e.message : String(e)}`);
       if (felIRad >= 5) {

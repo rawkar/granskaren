@@ -85,6 +85,8 @@ export interface Kostnad {
   tokens_ut: number;
   tokens_cache_las?: number;
   tokens_cache_skriv?: number;
+  /** Antal webbsökningar i anropet. Debiteras utöver tokens. */
+  sokningar?: number;
   kostnad_usd?: number | null;
 }
 
@@ -332,8 +334,8 @@ export function harFattMejl(d: Db, prospektId: number): boolean {
 
 export function sparaKostnad(d: Db, k: Kostnad): void {
   d.prepare(
-    `INSERT INTO kostnader (prospekt_id, steg, modell, tokens_in, tokens_ut, tokens_cache_las, tokens_cache_skriv, kostnad_usd)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO kostnader (prospekt_id, steg, modell, tokens_in, tokens_ut, tokens_cache_las, tokens_cache_skriv, sokningar, kostnad_usd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     k.prospekt_id,
     k.steg,
@@ -342,6 +344,7 @@ export function sparaKostnad(d: Db, k: Kostnad): void {
     k.tokens_ut,
     k.tokens_cache_las ?? 0,
     k.tokens_cache_skriv ?? 0,
+    k.sokningar ?? 0,
     k.kostnad_usd ?? null,
   );
 }
@@ -351,4 +354,66 @@ export function kostnadForProspekt(d: Db, prospektId: number): number {
     .prepare("SELECT COALESCE(SUM(kostnad_usd), 0) AS s FROM kostnader WHERE prospekt_id = ?")
     .get(prospektId) as { s: number };
   return r.s;
+}
+
+/** Summan av alla modellanrop under den innevarande kalendermånaden (lokal tid), i USD. */
+export function kostnadDennaManad(d: Db, nu = new Date()): number {
+  const manad = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, "0")}`;
+  const r = d
+    .prepare("SELECT COALESCE(SUM(kostnad_usd), 0) AS s FROM kostnader WHERE strftime('%Y-%m', tidpunkt, 'localtime') = ?")
+    .get(manad) as { s: number };
+  return r.s;
+}
+
+// ---------- sökträffar från discover ----------
+
+export interface SokTraff {
+  id: number;
+  segment_id: number | null;
+  kundtyp: number | null;
+  kalla: string;
+  doman: string;
+  namn: string | null;
+  varfor: string | null;
+  hittad: string;
+  behandlad: string | null;
+}
+
+/** Hur länge en sparad sökträff återanvänds innan den räknas som för gammal. */
+export const SOKTRAFF_DAGAR = 30;
+
+/** Sparar träffar från en sökning så att de kan prövas senare utan ny sökning. Domäner som redan finns ignoreras. */
+export function sparaSoktraffar(d: Db, traffar: Omit<SokTraff, "id" | "hittad" | "behandlad">[]): number {
+  const ins = d.prepare("INSERT OR IGNORE INTO soktraffar (segment_id, kundtyp, kalla, doman, namn, varfor) VALUES (?, ?, ?, ?, ?, ?)");
+  let nya = 0;
+  d.transaction(() => {
+    for (const t of traffar) nya += ins.run(t.segment_id, t.kundtyp, t.kalla, t.doman, t.namn, t.varfor).changes;
+  })();
+  return nya;
+}
+
+/** Sparade träffar som ännu inte prövats och inte är äldre än SOKTRAFF_DAGAR, för en kundtyp eller ett segment. */
+export function obehandladeSoktraffar(d: Db, filter: { kundtyp?: number; segmentId?: number }, dagar = SOKTRAFF_DAGAR): SokTraff[] {
+  const villkor = ["behandlad IS NULL", `hittad >= datetime('now', '-${Math.max(0, Math.floor(dagar))} days')`];
+  const args: unknown[] = [];
+  if (filter.segmentId !== undefined) {
+    villkor.push("segment_id = ?");
+    args.push(filter.segmentId);
+  } else if (filter.kundtyp !== undefined) {
+    villkor.push("kundtyp = ?");
+    args.push(filter.kundtyp);
+  }
+  return d.prepare(`SELECT * FROM soktraffar WHERE ${villkor.join(" AND ")} ORDER BY id`).all(...args) as SokTraff[];
+}
+
+export function markeraSoktraffBehandlad(d: Db, doman: string): void {
+  d.prepare("UPDATE soktraffar SET behandlad = datetime('now') WHERE doman = ? AND behandlad IS NULL").run(doman);
+}
+
+/** När segmentet senast söktes, eller null om det inte har sökts inom SOKTRAFF_DAGAR. */
+export function segmentSoktNyligen(d: Db, segmentId: number, dagar = SOKTRAFF_DAGAR): string | null {
+  const r = d
+    .prepare(`SELECT MAX(hittad) AS h FROM soktraffar WHERE segment_id = ? AND hittad >= datetime('now', '-${Math.max(0, Math.floor(dagar))} days')`)
+    .get(segmentId) as { h: string | null };
+  return r.h;
 }

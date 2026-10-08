@@ -206,6 +206,25 @@ export const MIGRERINGAR: { namn: string; sql: string }[] = [
       );
     `,
   },
+  {
+    namn: "004_soktraffar_sokningar",
+    sql: `
+      ALTER TABLE kostnader ADD COLUMN sokningar INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE soktraffar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        segment_id INTEGER REFERENCES segment(id) ON DELETE SET NULL,
+        kundtyp INTEGER,
+        kalla TEXT NOT NULL,
+        doman TEXT NOT NULL UNIQUE,
+        namn TEXT,
+        varfor TEXT,
+        hittad TEXT NOT NULL DEFAULT (datetime('now')),
+        behandlad TEXT
+      );
+      CREATE INDEX soktraffar_segment ON soktraffar(segment_id);
+    `,
+  },
 ];
 
 export const PROSPEKT_STATUS = [

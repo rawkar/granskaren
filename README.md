@@ -165,4 +165,21 @@ Testerna använder sparade HTML-sidor i `tests/fixtures/` och en databas i minne
 
 ## Kostnad
 
-Varje modellanrop loggas i tabellen `kostnader` med steg, modell och tokens. `status` visar total kostnad och kostnad per granskad sajt. Lägg dessutom ett kostnadstak på Anthropic-kontot.
+Varje modellanrop loggas i tabellen `kostnader` med steg, modell, tokens och antal webbsökningar (webbsökning debiteras med 10 USD per 1 000 sökningar utöver tokens). Prislistan ligger i `src/analyze/klient.ts` och är hämtad från platform.claude.com/docs/en/about-claude/pricing. `status` visar total kostnad, kostnad per granskad sajt och månadens förbrukning mot taket.
+
+`MAX_KOSTNAD_PER_MANAD` i `.env` är ett tak i USD per kalendermånad enligt kostnadsloggen. När det nås kastas ett fel före nästa modellanrop och `run`, `audit`, `draft` och `discover` avbryter i stället för att försöka igen. `0` stänger av taket. Lägg dessutom ett kostnadstak på Anthropic-kontot, eftersom loggen bara ser det den här koden anropar.
+
+### Sparade sökträffar
+
+Alla träffar från en webbsökning i `discover` sparas i tabellen `soktraffar`. Träffar som inte hann prövas innan målet för dagen var nått prövas nästa gång innan någon ny sökning görs, i upp till 30 dagar. Ett segment som har sökts söks inte om inom samma tid.
+
+### Jämföra modeller
+
+`scripts/jamfor-modeller.ts` kör analys, verifiering och mejlutkast igen för redan granskade sajter med en annan modell, mot en kopia av databasen och med samma hämtade sidor som underlag. Inget skickas och driften påverkas inte. Resultatet med huvudinsikt, fynd, färdigt mejl och kostnad sida vid sida hamnar i `data/jamforelse/`.
+
+```
+npx tsx scripts/jamfor-modeller.ts --modell claude-sonnet-5-5 --sajter exempel.se,annan.se --discover 7 --segment --likhetsprofil
+npx tsx scripts/jamfor-modeller.ts --snabb claude-haiku-5-5 --verifiering exempel.se,annan.se
+```
+
+`--modell` byter analysmodellen (analys, utkast, discover, segment, likhetsprofil) och `--snabb` den snabba modellen (verifiering, förfilter, grind).

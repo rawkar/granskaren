@@ -29,10 +29,19 @@ const decimal = (standard: number) =>
 
 const klockslag = z.string().regex(/^\d{2}:\d{2}$/, "Formatet är HH:MM");
 
+const belopp = (standard: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? Number.parseFloat(v.replace(",", ".")) : standard))
+    .pipe(z.number().nonnegative("Beloppet kan inte vara negativt"));
+
 const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   MODEL_ANALYS: z.string().min(1, "MODEL_ANALYS saknas i .env"),
   MODEL_SNABB: z.string().min(1, "MODEL_SNABB saknas i .env"),
+  /** Kostnadstak per kalendermånad i USD enligt tabellen kostnader. 0 betyder inget tak. Körningar avbryts när det nås. */
+  MAX_KOSTNAD_PER_MANAD: belopp(0),
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),

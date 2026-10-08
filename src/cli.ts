@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import { Command } from "commander";
+import { KostnadstakError, kostnadstak } from "./analyze/klient.js";
 import { granskaProspekt } from "./audit.js";
 import { konfig } from "./config.js";
 import { db } from "./db/index.js";
-import { allaProspekt, hamtaProspektViaDoman, laggTillSparr, loggaHandelse, prospektMedStatus, sattStatus } from "./db/fragor.js";
+import { allaProspekt, hamtaProspektViaDoman, kostnadDennaManad, laggTillSparr, loggaHandelse, prospektMedStatus, sattStatus } from "./db/fragor.js";
 import { importeraFil } from "./discover/import.js";
 import { rapportSokvag } from "./report/rapport.js";
 import { review } from "./email/review.js";
@@ -79,6 +80,7 @@ program
         const msg = e instanceof Error ? e.message : String(e);
         logg.fel(`${p.doman}: ${msg}`);
         loggaHandelse(d, p.id, "fel", msg);
+        if (e instanceof KostnadstakError) break;
       }
     }
     logg.info(`Klart. Granskade: ${utfall.granskad}, hoppade: ${utfall.hoppad}, fel: ${utfall.fel}`);
@@ -124,6 +126,7 @@ program
         const msg = e instanceof Error ? e.message : String(e);
         logg.fel(`${p.doman}: ${msg}`);
         loggaHandelse(d, p.id, "fel", msg);
+        if (e instanceof KostnadstakError) break;
       }
     }
     logg.info(`Klart. ${skapade} utkast skapade. Gå igenom dem med: granskaren review`);
@@ -328,6 +331,8 @@ program
     console.log(`  Spärrlista              ${sparr}`);
     console.log(`  API-kostnad totalt      ${kost.s.toFixed(2)} USD (${kost.i} tokens in, ${kost.u} ut)`);
     console.log(`  Kostnad per granskad    ${granskade ? `${(kost.s / granskade).toFixed(3)} USD` : "-"}`);
+    const tak = kostnadstak(d);
+    console.log(`  Denna månad             ${tak ? `${tak.forbrukat.toFixed(2)} av ${tak.tak.toFixed(2)} USD${tak.natt ? " (TAKET ÄR NÅTT)" : ""}` : `${kostnadDennaManad(d).toFixed(2)} USD, inget tak satt`}`);
     const perTyp = utfallPerKundtyp(d);
     if (perTyp.some((r) => r.prospekt > 0)) {
       console.log("");

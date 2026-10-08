@@ -5,7 +5,33 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
 import { konfig, PROMPT_DIR } from "../config.js";
 import type { Db } from "../db/index.js";
-import { sparaKostnad } from "../db/fragor.js";
+import { kostnadDennaManad, sparaKostnad } from "../db/fragor.js";
+
+/** Kastas när månadens kostnadstak är nått. Körningar ska avbrytas, inte försöka igen. */
+export class KostnadstakError extends Error {
+  constructor(meddelande: string) {
+    super(meddelande);
+    this.name = "KostnadstakError";
+  }
+}
+
+/** Månadens förbrukning mot taket i .env, eller null om inget tak är satt. */
+export function kostnadstak(d: Db): { tak: number; forbrukat: number; natt: boolean } | null {
+  const tak = konfig().MAX_KOSTNAD_PER_MANAD;
+  if (tak <= 0) return null;
+  const forbrukat = kostnadDennaManad(d);
+  return { tak, forbrukat, natt: forbrukat >= tak };
+}
+
+/** Kastar KostnadstakError om månadens tak är nått. Anropas före varje modellanrop. */
+export function kontrolleraKostnadstak(d: Db): void {
+  const t = kostnadstak(d);
+  if (t?.natt) {
+    throw new KostnadstakError(
+      `Månadens kostnadstak på ${t.tak.toFixed(2)} USD är nått (${t.forbrukat.toFixed(2)} USD förbrukat). Höj MAX_KOSTNAD_PER_MANAD i .env för att fortsätta.`,
+    );
+  }
+}
 
 let klient: Anthropic | undefined;
 
@@ -27,18 +53,29 @@ export function lasPrompt(namn: string): string {
   return fs.readFileSync(fil, "utf8");
 }
 
-/** Prislista i USD per miljon tokens. Okända modeller får kostnad null men tokens loggas ändå. */
+/**
+ * Prislista i USD per miljon tokens, enligt platform.claude.com/docs/en/about-claude/pricing (kontrollerad 2026-10-08).
+ * Haiku 5.5 gäller för promptar upp till 100 000 tokens. Okända modeller får kostnad null men tokens loggas ändå.
+ */
 const PRISER: { prefix: string; in: number; ut: number; cacheLas: number; cacheSkriv: number }[] = [
   { prefix: "claude-fable-5-1", in: 10, ut: 50, cacheLas: 0.25, cacheSkriv: 12.5 },
   { prefix: "claude-fable-5", in: 10, ut: 50, cacheLas: 1, cacheSkriv: 12.5 },
   { prefix: "claude-opus-5-5", in: 4, ut: 20, cacheLas: 0.2, cacheSkriv: 5 },
   { prefix: "claude-opus-5", in: 5, ut: 25, cacheLas: 0.5, cacheSkriv: 6.25 },
   { prefix: "claude-opus-4", in: 5, ut: 25, cacheLas: 0.5, cacheSkriv: 6.25 },
-  { prefix: "claude-sonnet-5-5", in: 2, ut: 10, cacheLas: 0.2, cacheSkriv: 2.5 },
+  { prefix: "claude-sonnet-5-5", in: 2, ut: 10, cacheLas: 0.1, cacheSkriv: 2.5 },
   { prefix: "claude-sonnet-5", in: 2, ut: 10, cacheLas: 0.2, cacheSkriv: 2.5 },
   { prefix: "claude-sonnet-4", in: 3, ut: 15, cacheLas: 0.3, cacheSkriv: 3.75 },
+  { prefix: "claude-haiku-5-5", in: 0.1, ut: 0.5, cacheLas: 0.01, cacheSkriv: 0.125 },
   { prefix: "claude-haiku-4-5", in: 1, ut: 5, cacheLas: 0.1, cacheSkriv: 1.25 },
 ];
+
+/** Webbsökning debiteras per sökning utöver tokens: 10 USD per 1 000 sökningar. */
+export const PRIS_PER_SOKNING_USD = 0.01;
+
+export function antalSokningar(u: Anthropic.Usage): number {
+  return (u as { server_tool_use?: { web_search_requests?: number } }).server_tool_use?.web_search_requests ?? 0;
+}
 
 export function beraknaKostnad(modell: string, u: Anthropic.Usage): number | null {
   const pris = PRISER.find((p) => modell.startsWith(p.prefix));
@@ -49,7 +86,8 @@ export function beraknaKostnad(modell: string, u: Anthropic.Usage): number | nul
       u.output_tokens * pris.ut +
       (u.cache_read_input_tokens ?? 0) * pris.cacheLas +
       (u.cache_creation_input_tokens ?? 0) * pris.cacheSkriv) /
-    m
+      m +
+    antalSokningar(u) * PRIS_PER_SOKNING_USD
   );
 }
 
@@ -62,13 +100,14 @@ export function loggaAnvandning(d: Db, prospektId: number | null, steg: string, 
     tokens_ut: u.output_tokens,
     tokens_cache_las: u.cache_read_input_tokens ?? 0,
     tokens_cache_skriv: u.cache_creation_input_tokens ?? 0,
+    sokningar: antalSokningar(u),
     kostnad_usd: beraknaKostnad(modell, u),
   });
 }
 
-/** Modeller som tar emot output_config.effort. Haiku 4.5 gör det inte. */
+/** Modeller som tar emot output_config.effort. Haiku 4.5 gör det inte, Haiku 5.5 och senare gör det. */
 function stoderEffort(modell: string): boolean {
-  return !/haiku/.test(modell);
+  return !/haiku-4/.test(modell);
 }
 
 export interface StruktureratAnrop<S extends z.ZodType> {
@@ -88,6 +127,7 @@ export interface StruktureratAnrop<S extends z.ZodType> {
  * Streamar så att långa underlag inte slår i tidsgränser. Loggar tokens och kostnad.
  */
 export async function strukturerat<S extends z.ZodType>(a: StruktureratAnrop<S>): Promise<z.infer<S>> {
+  kontrolleraKostnadstak(a.d);
   const client = anthropic();
   const format = zodOutputFormat(a.schema);
   const outputConfig: Record<string, unknown> = { format };
