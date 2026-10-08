@@ -14,6 +14,7 @@ import { profileraForebilder } from "./discover/forebilder.js";
 import { allaSegment, skapaSegment } from "./discover/segment.js";
 import { discover } from "./discover/discover.js";
 import { utfallPerKundtyp, weekly } from "./report/weekly.js";
+import { avbrytPaus, pausad, tillampaPaus } from "./report/vakt.js";
 import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
@@ -46,6 +47,7 @@ program
   .action(async (o: { antal: string; doman?: string; igen: boolean; utanModell: boolean; utanLighthouse: boolean }) => {
     konfig();
     const d = db();
+    tillampaPaus(d);
     const antal = Math.max(1, Number.parseInt(o.antal, 10) || 5);
     let lista;
     if (o.doman) {
@@ -95,6 +97,7 @@ program
   .action(async (o: { antal: string; doman?: string; testTill?: string }) => {
     konfig();
     const d = db();
+    tillampaPaus(d);
     let lista;
     if (o.doman) {
       const dom = normaliseraDoman(o.doman);
@@ -236,6 +239,25 @@ program
   .action(async (o: { enGang: boolean; utanDiscover: boolean }) => {
     konfig();
     await run(db(), { enGang: o.enGang, utanDiscover: o.utanDiscover });
+  });
+
+program
+  .command("paus")
+  .description("Visar om kvalitetsvakten har pausat ändringarna, och tar bort pausen med --av")
+  .option("--av", "ta bort pausen så att inställningarna i .env gäller igen", false)
+  .action((o: { av: boolean }) => {
+    konfig();
+    const d = db();
+    const p = pausad(d);
+    if (o.av) {
+      logg.info(avbrytPaus(d) ? "Pausen är borttagen. Inställningarna i .env gäller från nästa körning." : "Ingen paus att ta bort.");
+      return;
+    }
+    if (!p) {
+      logg.info("Ingen paus. Inställningarna i .env gäller.");
+      return;
+    }
+    logg.info(`Ändringarna är pausade sedan ${p.datum}: ${p.skal.join("; ")}. Driften kör på ${konfig().MODEL_UPPTRAPPNING}. Ta bort pausen med: granskaren paus --av`);
   });
 
 program

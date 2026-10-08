@@ -9,6 +9,7 @@ import { discover } from "./discover/discover.js";
 import { likhetsprofiler } from "./discover/forebilder.js";
 import { hinder, inomFonster, arVardag, nastaKoade, skickaEtt, skickadeIdag, slumpadPausMs } from "./email/skicka.js";
 import { skapaUtkast } from "./email/utkast.js";
+import { vaktaOchPausa } from "./report/vakt.js";
 import { logg, paus } from "./util/logg.js";
 
 export interface RunAlternativ {
@@ -71,6 +72,7 @@ async function runInre(d: Db, alt: RunAlternativ): Promise<void> {
   const k = konfig();
   logg.info(`run startar. Läge ${k.SANDLAGE}, torrkörning ${k.TORRKORNING ? "PÅ" : "av"}, tak ${k.MAX_MEJL_PER_DAG} per dag, fönster ${k.SANDFONSTER_START} till ${k.SANDFONSTER_SLUT}, paus ${k.PAUS_MIN_MINUTER} till ${k.PAUS_MAX_MINUTER} minuter.`);
   if (k.SANDLAGE !== "auto") logg.varning("SANDLAGE är granska. Utkast hamnar i granskningskön och inget skickas förrän du godkänner dem.");
+  await vaktaOchPausa(d);
   const takVidStart = kostnadstak(d);
   if (takVidStart) logg.info(`Kostnadstak: ${takVidStart.forbrukat.toFixed(2)} av ${takVidStart.tak.toFixed(2)} USD förbrukat den här månaden.`);
   else logg.varning("MAX_KOSTNAD_PER_MANAD är inte satt i .env, inget kostnadstak.");

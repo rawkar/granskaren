@@ -1,5 +1,6 @@
 import type { Db } from "../db/index.js";
 import { aktuellFordelning, justeraFordelning, lasKundprofil, sparaFordelning } from "../discover/kundprofil.js";
+import { uppfoljningsRader } from "./vakt.js";
 
 export interface KundtypUtfall {
   kundtyp: number;
@@ -54,6 +55,8 @@ export function weekly(d: Db, alt: { justera?: boolean } = {}): string[] {
   }
   rader.push(`  API-kostnad: ${kost.s.toFixed(2)} USD${granskadeVecka ? ` (${(kost.s / granskadeVecka).toFixed(3)} USD per granskad sajt)` : ""}`);
   rader.push("");
+  const uppfoljning = uppfoljningsRader(d);
+  if (uppfoljning.length) rader.push(...uppfoljning, "");
   rader.push("Totalt");
   rader.push(`  ${"Kundtyp".padEnd(36)} ${"skick".padStart(6)} ${"svar".padStart(5)} ${"andel".padStart(6)} ${"pos".padStart(4)}`);
   for (const r of totalt) {

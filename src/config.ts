@@ -62,6 +62,12 @@ const schema = z.object({
   MEJL_FLER_FYND: bool,
   /** Livslängd på cachen för systemprompten. 1h lönar sig när sajterna ligger mer än fem minuter isär. */
   CACHE_TTL: z.enum(["5m", "1h"]).optional().default("5m"),
+  /** Dagen ändringarna slogs på, YYYY-MM-DD. Styr veckorapportens jämförelse med Opus-perioden och kvalitetsvakten. Tom stänger av båda. */
+  ANDRINGAR_FRAN: z
+    .string()
+    .optional()
+    .default("")
+    .refine((v) => v === "" || /^\d{4}-\d{2}-\d{2}$/.test(v), "Formatet är YYYY-MM-DD"),
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),
