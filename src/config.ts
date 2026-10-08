@@ -38,8 +38,12 @@ const belopp = (standard: number) =>
 
 const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(""),
+  /** Analys, utkast, segment och likhetsprofil. */
   MODEL_ANALYS: z.string().min(1, "MODEL_ANALYS saknas i .env"),
+  /** Verifiering, förfilter och grind. */
   MODEL_SNABB: z.string().min(1, "MODEL_SNABB saknas i .env"),
+  /** Webbsökningen i discover. Tom betyder samma som MODEL_ANALYS. */
+  MODEL_DISCOVER: z.string().optional().default(""),
   /** Kostnadstak per kalendermånad i USD enligt tabellen kostnader. 0 betyder inget tak. Körningar avbryts när det nås. */
   MAX_KOSTNAD_PER_MANAD: belopp(0),
 
@@ -91,6 +95,7 @@ export function konfig(): Konfig {
   }
   // TORRKORNING saknas helt => säkert standardvärde är true.
   if (process.env.TORRKORNING === undefined) resultat.data.TORRKORNING = true;
+  if (!resultat.data.MODEL_DISCOVER.trim()) resultat.data.MODEL_DISCOVER = resultat.data.MODEL_ANALYS;
   if (resultat.data.MAX_SIDOR_PER_SAJT > 8) resultat.data.MAX_SIDOR_PER_SAJT = 8;
   if (resultat.data.PAUS_MELLAN_SIDOR_MS < 2000) resultat.data.PAUS_MELLAN_SIDOR_MS = 2000;
   cache = resultat.data;

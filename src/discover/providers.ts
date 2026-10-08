@@ -50,14 +50,15 @@ export class WebbSokning implements SearchProvider {
     const tools: Anthropic.ToolUnion[] = [
       { type: "web_search_20260209", name: "web_search", max_uses: maxSok, user_location: { type: "approximate", country: "SE", timezone: "Europe/Stockholm" } },
     ];
+    const modell = k.MODEL_DISCOVER;
     kontrolleraKostnadstak(d);
-    let svar = await client.messages.create({ model: k.MODEL_ANALYS, max_tokens: 8000, system: lasPrompt("discover-webb"), messages, tools });
-    loggaAnvandning(d, null, "discover_webb", k.MODEL_ANALYS, svar.usage);
+    let svar = await client.messages.create({ model: modell, max_tokens: 8000, system: lasPrompt("discover-webb"), messages, tools });
+    loggaAnvandning(d, null, "discover_webb", modell, svar.usage);
     for (let i = 0; i < 4 && svar.stop_reason === "pause_turn"; i++) {
       messages.push({ role: "assistant", content: svar.content });
       kontrolleraKostnadstak(d);
-      svar = await client.messages.create({ model: k.MODEL_ANALYS, max_tokens: 8000, system: lasPrompt("discover-webb"), messages, tools });
-      loggaAnvandning(d, null, "discover_webb", k.MODEL_ANALYS, svar.usage);
+      svar = await client.messages.create({ model: modell, max_tokens: 8000, system: lasPrompt("discover-webb"), messages, tools });
+      loggaAnvandning(d, null, "discover_webb", modell, svar.usage);
     }
     if (svar.stop_reason === "refusal") throw new Error("Modellen avböjde sökningen.");
     const text = svar.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n");
