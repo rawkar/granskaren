@@ -100,7 +100,7 @@ export function flerFyndText(flerFynd: number | null): string {
   return [
     "\n\n## Fler fynd",
     "",
-    `Rawaz har ${flerFynd} bekräftade fynd till som inte tas upp i mejlet. Lägg omedelbart före erbjudandet om hjälp en egen mening med innebörden att han såg fler saker på sajten som går att förbättra och gärna berättar om dem i ett samtal. Nämn inte vad de handlar om och inget antal. Variera formuleringen från mejl till mejl och följ tilltalet och språkreglerna. Exempel på nivå, inte en mall: "Jag såg fler saker som går att förbättra på sajten och dem berättar jag gärna om i ett samtal."`,
+    `Rawaz har ${flerFynd} bekräftade fynd till som inte tas upp i mejlet. Lägg omedelbart före erbjudandet om hjälp en egen mening med innebörden att han såg fler saker på sajten som går att förbättra och gärna berättar om dem i ett samtal. Nämn inte vad de handlar om och inget antal. Följ tilltalet och språkreglerna. Meningen ska vara skriven med egna ord för just det här mejlet: använd aldrig frasen "fler saker som går att förbättra" och skriv inte av exemplet. Exempel på nivå, inte en mall: "Det finns några saker till på sajten som jag hellre tar i ett samtal än i ett mejl."`,
   ].join("\n");
 }
 
