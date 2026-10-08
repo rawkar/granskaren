@@ -169,6 +169,32 @@ Varje modellanrop loggas i tabellen `kostnader` med steg, modell, tokens och ant
 
 `MAX_KOSTNAD_PER_MANAD` i `.env` är ett tak i USD per kalendermånad enligt kostnadsloggen. När det nås kastas ett fel före nästa modellanrop och `run`, `audit`, `draft` och `discover` avbryter i stället för att försöka igen. `0` stänger av taket. Lägg dessutom ett kostnadstak på Anthropic-kontot, eftersom loggen bara ser det den här koden anropar.
 
+### Inställningar som sänker kostnaden
+
+Varje ändring styrs av en rad i `.env` och kan slås av utan kodändring. Standardvärdena ger samma beteende som innan inställningen fanns.
+
+| Inställning | Standard | Förslag | Vad den gör |
+|---|---|---|---|
+| `MODEL_ANALYS` | claude-opus-5-5 | claude-sonnet-5-5 | Modell för analys, utkast, segment och likhetsprofil |
+| `MODEL_DISCOVER` | samma som MODEL_ANALYS | claude-opus-5-5 | Modell för webbsökningen i discover |
+| `ANALYS_MAX_FYND` | 6 | 4 | Högsta antal fynd per sajt |
+| `ANALYS_KORT` | false | true | Slår ihop observation, insikt och rotorsak till ett fält på högst två meningar |
+| `UPPTRAPPNING` | false | true | Kör analysen om en gång på `MODEL_UPPTRAPPNING` när huvudinsikt saknas, inget bekräftat fynd har djup 3 eller färre än tre fynd bekräftas. Loggas som händelsen upptrappning |
+| `MODEL_UPPTRAPPNING` | claude-opus-5-5 | | Modellen upptrappningen använder |
+| `MEJL_ORDMAL` | 0 (promptens 160 till 200) | 190 | Ordmål för brödtexten som skickas med till modellen |
+| `MEJL_MAX_ORD` | 220 | 210 | Grindens övre ordgräns |
+| `MEJL_FLER_FYND` | false | true | En mening före erbjudandet om att Rawaz såg fler saker, bara när det finns bekräftade fynd utanför mejlet. Grinden stoppar mejl som påstår det utan sådana fynd |
+| `CACHE_TTL` | 5m | 1h | Livslängd på cachen för systemprompten |
+| `ANDRINGAR_FRAN` | tom | dagen ändringarna slogs på | Veckorapporten jämför tiden efter med Opus-perioden före, och kvalitetsvakten slås på |
+
+Verifieringen, kravet på belägg, grinden i övrigt och discover påverkas inte av inställningarna.
+
+### Uppföljning och kvalitetsvakt
+
+Med `ANDRINGAR_FRAN` satt visar `weekly` kostnad per skickat mejl uppdelat per steg, andel bekräftade fynd, andel sajter som trappades upp, andel utkast som grinden stoppade och svarsfrekvens, för Opus-perioden, tiden sedan ändringarna och de senaste sju dagarna.
+
+Varje gång `run` startar jämför kvalitetsvakten de senaste sju dagarna med Opus-perioden, om veckan har minst fem granskade sajter. Sjunker andelen bekräftade fynd mer än fem procentenheter, eller trappas mer än var tredje sajt upp, pausas ändringarna: driften går tillbaka till `MODEL_UPPTRAPPNING` med promptens standardomfång och Rawaz får ett mejl på avsändaradressen. `granskaren paus` visar läget och `granskaren paus --av` tar bort pausen.
+
 ### Sparade sökträffar
 
 Alla träffar från en webbsökning i `discover` sparas i tabellen `soktraffar`. Träffar som inte hann prövas innan målet för dagen var nått prövas nästa gång innan någon ny sökning görs, i upp till 30 dagar. Ett segment som har sökts söks inte om inom samma tid.
