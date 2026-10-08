@@ -77,15 +77,26 @@ export function antalSokningar(u: Anthropic.Usage): number {
   return (u as { server_tool_use?: { web_search_requests?: number } }).server_tool_use?.web_search_requests ?? 0;
 }
 
+/** Cache-skrivningar uppdelade på livslängd. 5 minuter kostar 1,25 gånger inpriset, 1 timme 2 gånger. */
+function cacheSkrivningar(u: Anthropic.Usage): { fem: number; timme: number } {
+  const detalj = (u as { cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | null }).cache_creation;
+  if (detalj && (detalj.ephemeral_5m_input_tokens !== undefined || detalj.ephemeral_1h_input_tokens !== undefined)) {
+    return { fem: detalj.ephemeral_5m_input_tokens ?? 0, timme: detalj.ephemeral_1h_input_tokens ?? 0 };
+  }
+  return { fem: u.cache_creation_input_tokens ?? 0, timme: 0 };
+}
+
 export function beraknaKostnad(modell: string, u: Anthropic.Usage): number | null {
   const pris = PRISER.find((p) => modell.startsWith(p.prefix));
   if (!pris) return null;
   const m = 1_000_000;
+  const cache = cacheSkrivningar(u);
   return (
     (u.input_tokens * pris.in +
       u.output_tokens * pris.ut +
       (u.cache_read_input_tokens ?? 0) * pris.cacheLas +
-      (u.cache_creation_input_tokens ?? 0) * pris.cacheSkriv) /
+      cache.fem * pris.cacheSkriv +
+      cache.timme * pris.in * 2) /
       m +
     antalSokningar(u) * PRIS_PER_SOKNING_USD
   );
@@ -132,11 +143,13 @@ export async function strukturerat<S extends z.ZodType>(a: StruktureratAnrop<S>)
   const format = zodOutputFormat(a.schema);
   const outputConfig: Record<string, unknown> = { format };
   if (a.effort && stoderEffort(a.modell)) outputConfig.effort = a.effort;
+  // Systemprompten är densamma för alla sajter och cachas. Med CACHE_TTL=1h överlever cachen pauserna mellan sajter.
+  const cache: Anthropic.CacheControlEphemeral = konfig().CACHE_TTL === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" };
 
   const stream = client.messages.stream({
     model: a.modell,
     max_tokens: a.maxTokens ?? 16000,
-    system: [{ type: "text", text: a.system, cache_control: { type: "ephemeral" } }],
+    system: [{ type: "text", text: a.system, cache_control: cache }],
     messages: [{ role: "user", content: a.innehall }],
     output_config: outputConfig as never,
   });

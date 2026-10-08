@@ -60,6 +60,8 @@ const schema = z.object({
   MEJL_MAX_ORD: heltal(220),
   /** true lägger till en mening före erbjudandet om att Rawaz såg fler saker, bara när det finns bekräftade fynd utanför mejlet. */
   MEJL_FLER_FYND: bool,
+  /** Livslängd på cachen för systemprompten. 1h lönar sig när sajterna ligger mer än fem minuter isär. */
+  CACHE_TTL: z.enum(["5m", "1h"]).optional().default("5m"),
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),
