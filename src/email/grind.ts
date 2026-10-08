@@ -89,9 +89,20 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string, t
   return fel;
 }
 
-/** Regler från tillägget som kontrolleras med kod: fyndens djup, konkret förslag på egen rad, siffror. */
-export function tillaggsfel(brodtext: string, fynd: FyndRad[]): string[] {
+/** Formuleringar som påstår att det finns fler saker att förbättra. Får bara finnas när det finns fler bekräftade fynd. */
+export const FLER_FYND = /fler (saker|förbättringar|punkter|iakttagelser|detaljer|möjligheter|förslag|ställen|områden)|flera (andra )?(saker|förbättringar|iakttagelser)|mer (som|att) (går att )?förbättra|ytterligare (saker|förbättringar|iakttagelser|punkter)/i;
+
+/**
+ * Regler från tillägget som kontrolleras med kod: fyndens djup, konkret förslag på egen rad, siffror.
+ * flerFynd är antalet bekräftade fynd utanför mejlet när MEJL_FLER_FYND är på (null när den är av): står det 0
+ * får mejlet inte påstå att det finns fler saker att förbättra.
+ */
+export function tillaggsfel(brodtext: string, fynd: FyndRad[], flerFynd: number | null = null): string[] {
   const fel: string[] = [];
+  if (flerFynd === 0) {
+    const traff = brodtext.match(FLER_FYND);
+    if (traff) fel.push(`påstår att det finns fler saker att förbättra ("${traff[0]}") fast inga fler fynd är bekräftade`);
+  }
   if (!fynd.some((f) => f.djup === 3)) fel.push("inget av fynden har djup 3");
   if (fynd.filter((f) => f.djup === 1).length > 1) fel.push("fler än ett fynd med djup 1");
   const forslag = fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x);
@@ -123,14 +134,14 @@ export async function kvalitetsgrind(
   fynd: FyndRad[],
   bra: { text: string }[],
   mottagare: string | null,
-  alt: { testlage?: boolean; huvudinsikt?: string | null; profil?: string | null; tilltal?: Tilltal } = {},
+  alt: { testlage?: boolean; huvudinsikt?: string | null; profil?: string | null; tilltal?: Tilltal; flerFynd?: number | null } = {},
 ): Promise<Grindresultat> {
   const k = konfig();
   const fel: string[] = [];
   const varningar: string[] = [];
 
   fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
-  fel.push(...tillaggsfel(utkast.brodtext, fynd));
+  fel.push(...tillaggsfel(utkast.brodtext, fynd, alt.flerFynd ?? null));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);
   if (!namnEllerDoman.some((n) => utkast.amne.toLowerCase().includes(n.toLowerCase().replace(/^www\./, "")))) {

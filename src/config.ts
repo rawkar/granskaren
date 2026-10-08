@@ -58,6 +58,8 @@ const schema = z.object({
   MEJL_ORDMAL: heltal(0),
   /** Grindens övre ordgräns för brödtexten. Standard 220. */
   MEJL_MAX_ORD: heltal(220),
+  /** true lägger till en mening före erbjudandet om att Rawaz såg fler saker, bara när det finns bekräftade fynd utanför mejlet. */
+  MEJL_FLER_FYND: bool,
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),

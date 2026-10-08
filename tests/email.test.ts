@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { avkoda, hittaAdresser, utvinnKontakter } from "../src/email/kontakter.js";
 import { valjFynd } from "../src/email/val.js";
 import { antalOrd, byggAmne, sprakfel, tillaggsfel } from "../src/email/grind.js";
+import { flerFyndText, langdText } from "../src/email/utkast.js";
+
+describe("tillägg till mejlprompten", () => {
+  it("är tomma när inställningarna är standard", () => {
+    expect(langdText(0, 220)).toBe("");
+    expect(flerFyndText(null)).toBe("");
+  });
+  it("anger ordmål och gräns", () => {
+    expect(langdText(190, 210)).toContain("Sikta på 190 ord");
+    expect(langdText(190, 210)).toContain("150 till 210");
+    expect(langdText(0, 210)).toContain("Sikta på 180 ord");
+  });
+  it("tillåter meningen om fler fynd bara när fler fynd finns", () => {
+    expect(flerFyndText(2)).toContain("2 bekräftade fynd till");
+    expect(flerFyndText(0)).toContain("Skriv inte att Rawaz såg fler saker");
+  });
+});
 import type { FyndRad } from "../src/db/fragor.js";
 
 describe("adressutvinning", () => {
@@ -169,6 +186,12 @@ Vänliga hälsningar`;
     expect(tillaggsfel(ok.replace("nio fält", "12 fält"), fyndOk)).toContain("siffran 12 finns inte i fynden");
     expect(tillaggsfel(ok.replace("nio fält", "9 fält"), fyndOk)).toEqual([]);
     expect(tillaggsfel(ok, [...fyndOk, fynd({ fynd_id: "x", djup: 1 })])).toContain("fler än ett fynd med djup 1");
+    // Meningen om fler fynd får bara finnas när det finns fler bekräftade fynd
+    const medFler = ok.replace("Jag hjälper gärna", "Jag såg fler saker som går att förbättra på sajten och dem berättar jag gärna om i ett samtal. Jag hjälper gärna");
+    expect(tillaggsfel(medFler, fyndOk, 0)).toContainEqual(expect.stringMatching(/påstår att det finns fler saker/));
+    expect(tillaggsfel(medFler, fyndOk, 2)).toEqual([]);
+    expect(tillaggsfel(medFler, fyndOk)).toEqual([]);
+    expect(tillaggsfel(ok, fyndOk, 0)).toEqual([]);
   });
 });
 

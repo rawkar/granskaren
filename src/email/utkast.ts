@@ -88,6 +88,22 @@ export function langdText(ordmal: number, maxOrd: number): string {
   return `\n\n## Längd för den här körningen\n\nSikta på ${mal} ord i brödtexten, exemplet inräknat. Gränsen är ${MIN_ORD} till ${maxOrd} ord och gäller i stället för längdregeln ovan. Räkna orden innan du svarar och stryk hellre en bisats än att gå över.`;
 }
 
+/**
+ * Tillägg till mejlprompten om meningen före erbjudandet (MEJL_FLER_FYND). flerFynd är antalet bekräftade fynd
+ * som inte används i mejlet, eller null när inställningen är av. Meningen får bara skrivas när det finns fler fynd.
+ */
+export function flerFyndText(flerFynd: number | null): string {
+  if (flerFynd === null) return "";
+  if (flerFynd <= 0) {
+    return "\n\n## Fler fynd\n\nDet finns inga fler bekräftade fynd än de som står i uppgifterna. Skriv inte att Rawaz såg fler saker som går att förbättra.";
+  }
+  return [
+    "\n\n## Fler fynd",
+    "",
+    `Rawaz har ${flerFynd} bekräftade fynd till som inte tas upp i mejlet. Lägg omedelbart före erbjudandet om hjälp en egen mening med innebörden att han såg fler saker på sajten som går att förbättra och gärna berättar om dem i ett samtal. Nämn inte vad de handlar om och inget antal. Variera formuleringen från mejl till mejl och följ tilltalet och språkreglerna. Exempel på nivå, inte en mall: "Jag såg fler saker som går att förbättra på sajten och dem berättar jag gärna om i ett samtal."`,
+  ].join("\n");
+}
+
 /** Skriver brödtexten med modellen kring huvudinsikten och de valda fynden. */
 export async function skrivUtkast(
   d: Db,
@@ -97,6 +113,7 @@ export async function skrivUtkast(
   profil: Profil | null,
   tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
+  flerFynd: number | null = null,
 ): Promise<{ brodtext: string }> {
   const k = konfig();
   const inledning =
@@ -124,6 +141,7 @@ export async function skrivUtkast(
       belagg: f.belagg_varde,
     })),
     ...(k.MEJL_ORDMAL > 0 ? { ordmal: k.MEJL_ORDMAL } : {}),
+    ...(flerFynd !== null ? { fler_bekraftade_fynd_utanfor_mejlet: flerFynd } : {}),
     ...(tidigareFel.length ? { foregaende_utkast_stoppades_pa_grund_av: tidigareFel } : {}),
   };
   return strukturerat({
@@ -131,7 +149,7 @@ export async function skrivUtkast(
     prospektId: p.id,
     steg: "utkast",
     modell: k.MODEL_ANALYS,
-    system: lasPrompt("mejl") + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD),
+    system: lasPrompt("mejl") + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD) + flerFyndText(flerFynd),
     innehall: [{ type: "text", text: `Uppgifter för mejlet i JSON:\n\n${JSON.stringify(uppgifter, null, 1)}` }],
     schema: UtkastSchema,
     maxTokens: 4000,
@@ -191,13 +209,15 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
   logg.info(`   huvudinsikt: ${huvudinsikt!.text}`);
   logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} djup ${f.djup}`).join(", ")}`);
 
-  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt!.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal };
+  // Bekräftade fynd som inte används i mejlet, för meningen före erbjudandet (MEJL_FLER_FYND)
+  const flerFynd = k.MEJL_FLER_FYND ? fynd.filter((f) => !valda.includes(f)).length : null;
+  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt!.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd };
   const forsok = alt.forsok ?? 2;
-  let utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal);
+  let utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal, [], flerFynd);
   let grind = await kvalitetsgrind(d, p, { amne, brodtext: utkast.brodtext }, valda, bra, mottagare, grindAlt);
   for (let i = 1; i < forsok && !grind.godkand; i++) {
     logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
-    utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal, grind.fel);
+    utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal, grind.fel, flerFynd);
     grind = await kvalitetsgrind(d, p, { amne, brodtext: utkast.brodtext }, valda, bra, mottagare, grindAlt);
   }
 
