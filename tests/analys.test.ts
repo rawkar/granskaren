@@ -23,6 +23,7 @@ describe("omfång för analysen", () => {
     const t = omfangsText(4, false);
     expect(t).toContain("högst 4 fynd");
     expect(t).toContain("djup 3");
+    expect(t).toContain("konkret förslag");
     expect(t).not.toContain("insikt och rotorsak");
   });
 

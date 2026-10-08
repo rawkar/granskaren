@@ -19,7 +19,7 @@ export function omfangsText(maxFynd: number, kort: boolean): string {
   const rader = ["## Omfång för den här körningen", ""];
   if (maxFynd < STANDARD_MAX_FYND) {
     rader.push(
-      `Ta fram högst ${maxFynd} fynd, de som har störst betydelse för sajtens syfte. Det gäller i stället för fyra till sex ovan. Minst ett av fynden ska ha djup 3, med två belägg som vanligt. Hellre färre fynd än ett fynd som är fel.`,
+      `Ta fram högst ${maxFynd} fynd, de som har störst betydelse för sajtens syfte. Det gäller i stället för fyra till sex ovan. Minst ett av fynden ska ha djup 3, med två belägg som vanligt, och minst ett av fynden med djup 3 ska ha ett konkret förslag (forslag_konkret), eftersom mejlet byggs på de fynden. Hellre färre fynd än ett fynd som är fel.`,
     );
   }
   if (kort) {
