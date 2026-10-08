@@ -47,6 +47,11 @@ const schema = z.object({
   /** Kostnadstak per kalendermånad i USD enligt tabellen kostnader. 0 betyder inget tak. Körningar avbryts när det nås. */
   MAX_KOSTNAD_PER_MANAD: belopp(0),
 
+  /** Högsta antal fynd analysen tar fram per sajt. 6 är prompten som den är skriven, 4 ger kortare och billigare analys. */
+  ANALYS_MAX_FYND: heltal(6),
+  /** true slår ihop observation, insikt och rotorsak till ett fält på högst två meningar. */
+  ANALYS_KORT: bool,
+
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),
   SMTP_USER: z.string().optional().default(""),
@@ -97,6 +102,7 @@ export function konfig(): Konfig {
   if (process.env.TORRKORNING === undefined) resultat.data.TORRKORNING = true;
   if (!resultat.data.MODEL_DISCOVER.trim()) resultat.data.MODEL_DISCOVER = resultat.data.MODEL_ANALYS;
   if (resultat.data.MAX_SIDOR_PER_SAJT > 8) resultat.data.MAX_SIDOR_PER_SAJT = 8;
+  resultat.data.ANALYS_MAX_FYND = Math.min(8, Math.max(2, resultat.data.ANALYS_MAX_FYND));
   if (resultat.data.PAUS_MELLAN_SIDOR_MS < 2000) resultat.data.PAUS_MELLAN_SIDOR_MS = 2000;
   cache = resultat.data;
   return cache;

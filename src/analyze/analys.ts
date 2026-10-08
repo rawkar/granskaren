@@ -4,8 +4,38 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { konfig, PROMPT_DIR } from "../config.js";
 import type { Db } from "../db/index.js";
 import { bildBlock, lasPrompt, strukturerat } from "./klient.js";
-import { AnalysSchema, OMRADEN, stadaFynd, type Analys } from "./schema.js";
+import { AnalysKortSchema, AnalysSchema, franKortAnalys, OMRADEN, stadaFynd, type Analys } from "./schema.js";
 import { underlagForModell, type Underlag } from "./underlag.js";
+
+/** Standardomfång enligt prompts/analys.md: fyra till sex fynd med alla fält. */
+export const STANDARD_MAX_FYND = 6;
+
+/**
+ * Tillägg till systemprompten när .env begär färre fynd (ANALYS_MAX_FYND) eller kortare fynd (ANALYS_KORT).
+ * Tom sträng när inget avviker från prompten som den är skriven.
+ */
+export function omfangsText(maxFynd: number, kort: boolean): string {
+  if (maxFynd >= STANDARD_MAX_FYND && !kort) return "";
+  const rader = ["## Omfång för den här körningen", ""];
+  if (maxFynd < STANDARD_MAX_FYND) {
+    rader.push(
+      `Ta fram högst ${maxFynd} fynd, de som har störst betydelse för sajtens syfte. Det gäller i stället för fyra till sex ovan. Minst ett av fynden ska ha djup 3, med två belägg som vanligt. Hellre färre fynd än ett fynd som är fel.`,
+    );
+  }
+  if (kort) {
+    rader.push(
+      "Fälten insikt och rotorsak finns inte i svaret. Skriv i stället observation så att den rymmer själva observationen, varför det spelar roll för den här organisationens syfte och den troliga orsaken, i högst två meningar. Belägg, djup, effekt, åtgärd och det konkreta förslaget är oförändrade.",
+    );
+  }
+  return `\n\n${rader.join("\n")}`;
+}
+
+export interface AnalysAlternativ {
+  /** Modell att använda i stället för MODEL_ANALYS, till exempel vid upptrappning. */
+  modell?: string;
+  /** Namn på steget i kostnadsloggen. Standard analys. */
+  steg?: string;
+}
 
 /**
  * Läser prompts/rawaz-perspektiv.md och returnerar det Rawaz har fyllt i.
@@ -28,8 +58,9 @@ export function lasPerspektiv(): string | null {
 }
 
 /** Ett analysanrop som ger profil, fynd och huvudinsikt i samma svar. */
-export async function analysera(d: Db, prospektId: number, u: Underlag): Promise<Analys> {
+export async function analysera(d: Db, prospektId: number, u: Underlag, alt: AnalysAlternativ = {}): Promise<Analys> {
   const k = konfig();
+  const maxFynd = k.ANALYS_MAX_FYND;
   const innehall: Anthropic.ContentBlockParam[] = [];
 
   // Högst en skärmbild: startsidan i mobil
@@ -48,22 +79,25 @@ export async function analysera(d: Db, prospektId: number, u: Underlag): Promise
   let system = lasPrompt("analys");
   const perspektiv = lasPerspektiv();
   if (perspektiv) system += `\n\n## Rawaz eget perspektiv\n\nDet här har Rawaz själv skrivit om hur han bedömer webbplatser. Väg in det i analysen och i valet av vad som är viktigast.\n\n${perspektiv}`;
+  system += omfangsText(maxFynd, k.ANALYS_KORT);
 
-  const svar = await strukturerat({
+  const bas = {
     d,
     prospektId,
-    steg: "analys",
-    modell: k.MODEL_ANALYS,
+    steg: alt.steg ?? "analys",
+    modell: alt.modell ?? k.MODEL_ANALYS,
     system,
     innehall,
-    schema: AnalysSchema,
     maxTokens: 20000,
-    effort: "high",
-  });
+    effort: "high" as const,
+  };
+  const svar: Analys = k.ANALYS_KORT
+    ? franKortAnalys(await strukturerat({ ...bas, schema: AnalysKortSchema }))
+    : await strukturerat({ ...bas, schema: AnalysSchema });
 
   // Efterstädning: intervall, tjänsteområde enligt område, unika id:n
   const sedda = new Set<string>();
-  svar.fynd = svar.fynd.slice(0, 8).map((f, i) => {
+  svar.fynd = svar.fynd.slice(0, maxFynd < STANDARD_MAX_FYND ? maxFynd : 8).map((f, i) => {
     const s = stadaFynd(f);
     s.tjansteomrade = OMRADEN[s.omrade].tjansteomrade;
     let id = s.id || `f-${String(i + 1).padStart(3, "0")}`;

@@ -94,6 +94,18 @@ export const AnalysSchema = z.object({
 });
 export type Analys = z.infer<typeof AnalysSchema>;
 
+/**
+ * Kortare fynd för ANALYS_KORT: observation rymmer observation, insikt och trolig orsak i högst två meningar.
+ * Belägg, djup och konkret förslag är oförändrade. Efter svaret fylls insikt med tom sträng och rotorsak med null.
+ */
+export const FyndKortSchema = FyndSchema.omit({ insikt: true, rotorsak: true });
+export const AnalysKortSchema = AnalysSchema.extend({ fynd: z.array(FyndKortSchema) });
+export type AnalysKort = z.infer<typeof AnalysKortSchema>;
+
+export function franKortAnalys(a: AnalysKort): Analys {
+  return { ...a, fynd: a.fynd.map((f) => ({ ...f, insikt: "", rotorsak: null })) };
+}
+
 export const VerifieringSchema = z.object({
   bedomning: z.enum(["bekraftat", "osakert", "fel"]),
   motivering: z.string(),
