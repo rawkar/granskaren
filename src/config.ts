@@ -54,6 +54,10 @@ const schema = z.object({
   /** true kör analysen om på MODEL_UPPTRAPPNING när huvudinsikt saknas, inget bekräftat fynd har djup 3 eller färre än tre fynd bekräftas. */
   UPPTRAPPNING: bool,
   MODEL_UPPTRAPPNING: z.string().optional().default("claude-opus-5-5"),
+  /** Ordmål för brödtexten som skickas med till modellen. 0 betyder promptens eget mål (160 till 200). */
+  MEJL_ORDMAL: heltal(0),
+  /** Grindens övre ordgräns för brödtexten. Standard 220. */
+  MEJL_MAX_ORD: heltal(220),
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),

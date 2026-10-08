@@ -130,6 +130,9 @@ Vänliga hälsningar`;
     expect(sprakfel("Hej: exempel.se", ok, "")).toContain("ämnesraden innehåller kolon");
     expect(sprakfel("Hej exempel.se", `${ok}\nTack!`, "")).toContain("innehåller utropstecken");
     expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "")[0]).toMatch(/ord, ska vara 150 till 220/);
+    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "", undefined, [], 210)[0]).toMatch(/ord, ska vara 150 till 210/);
+    expect(sprakfel("Hej exempel.se", ok, "", undefined, [], antalOrd(ok) - 1)).toContainEqual(expect.stringMatching(/ska vara 150 till/));
+    expect(sprakfel("Hej exempel.se", ok, "", undefined, [], antalOrd(ok))).toEqual([]);
     expect(sprakfel("En alldeles för lång ämnesrad som går långt över femtio tecken exempel.se", ok, "")).toContain(
       "ämnesraden är 73 tecken, högst 60",
     );

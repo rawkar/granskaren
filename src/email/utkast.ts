@@ -18,7 +18,7 @@ import {
 import { rapportSokvag } from "../report/rapport.js";
 import { dataMapp, filnamnSaker } from "../util/fil.js";
 import { logg } from "../util/logg.js";
-import { byggAmne, kvalitetsgrind, type Grindresultat, type Tilltal } from "./grind.js";
+import { byggAmne, kvalitetsgrind, MAX_ORD, MIN_ORD, type Grindresultat, type Tilltal } from "./grind.js";
 import { bastaKontakt, sparaKontakter, utvinnKontakter } from "./kontakter.js";
 import { valjFynd } from "./val.js";
 
@@ -78,6 +78,16 @@ function sakraProfilpunkter(profil: Profil | null): Record<string, string> {
   return ut;
 }
 
+/**
+ * Tillägg till mejlprompten när .env anger ett ordmål (MEJL_ORDMAL) eller en annan övre gräns än promptens 220.
+ * Tom sträng när inget avviker.
+ */
+export function langdText(ordmal: number, maxOrd: number): string {
+  if (ordmal <= 0 && maxOrd === MAX_ORD) return "";
+  const mal = ordmal > 0 ? ordmal : Math.round((MIN_ORD + maxOrd) / 2);
+  return `\n\n## Längd för den här körningen\n\nSikta på ${mal} ord i brödtexten, exemplet inräknat. Gränsen är ${MIN_ORD} till ${maxOrd} ord och gäller i stället för längdregeln ovan. Räkna orden innan du svarar och stryk hellre en bisats än att gå över.`;
+}
+
 /** Skriver brödtexten med modellen kring huvudinsikten och de valda fynden. */
 export async function skrivUtkast(
   d: Db,
@@ -113,6 +123,7 @@ export async function skrivUtkast(
       sida: f.belagg_url,
       belagg: f.belagg_varde,
     })),
+    ...(k.MEJL_ORDMAL > 0 ? { ordmal: k.MEJL_ORDMAL } : {}),
     ...(tidigareFel.length ? { foregaende_utkast_stoppades_pa_grund_av: tidigareFel } : {}),
   };
   return strukturerat({
@@ -120,7 +131,7 @@ export async function skrivUtkast(
     prospektId: p.id,
     steg: "utkast",
     modell: k.MODEL_ANALYS,
-    system: lasPrompt("mejl"),
+    system: lasPrompt("mejl") + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD),
     innehall: [{ type: "text", text: `Uppgifter för mejlet i JSON:\n\n${JSON.stringify(uppgifter, null, 1)}` }],
     schema: UtkastSchema,
     maxTokens: 4000,

@@ -41,7 +41,7 @@ const OMDOMEN = /som helst|intetsägande|allmän(t|na)? (rad|rubrik|formulering|
  * Språkregler som går att kontrollera med kod. Returnerar en lista med fel.
  * tilltal styr om du eller ni är det tillåtna tilltalet. Utelämnas det hoppas kontrollen över.
  */
-export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal, undantagsrader: string[] = []): string[] {
+export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal, undantagsrader: string[] = [], maxOrd = MAX_ORD): string[] {
   const fel: string[] = [];
   const hela = `${amne}\n${brodtext}`;
   // Det konkreta förslaget är text för sajten, inte för mottagaren, och undantas från tilltals- och omdömeskontrollen
@@ -60,7 +60,7 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string, t
   if (/^\s*[-*•\d]+[.)]?\s/m.test(brodtext)) fel.push("innehåller punktlista");
   if (/[*_#>`]/.test(brodtext)) fel.push("innehåller formateringstecken");
   const ord = antalOrd(brodtext);
-  if (ord < MIN_ORD || ord > MAX_ORD) fel.push(`brödtexten är ${ord} ord, ska vara ${MIN_ORD} till ${MAX_ORD}`);
+  if (ord < MIN_ORD || ord > maxOrd) fel.push(`brödtexten är ${ord} ord, ska vara ${MIN_ORD} till ${maxOrd}`);
   if (amne.length > MAX_AMNE) fel.push(`ämnesraden är ${amne.length} tecken, högst ${MAX_AMNE}`);
   if (amne.length < 10) fel.push("ämnesraden är för kort");
   if (amne === amne.toUpperCase() && /[A-ZÅÄÖ]/.test(amne)) fel.push("ämnesraden är skriven med versaler");
@@ -129,7 +129,7 @@ export async function kvalitetsgrind(
   const fel: string[] = [];
   const varningar: string[] = [];
 
-  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x)));
+  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
   fel.push(...tillaggsfel(utkast.brodtext, fynd));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);
