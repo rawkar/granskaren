@@ -30,6 +30,23 @@ export function omfangsText(maxFynd: number, kort: boolean): string {
   return `\n\n${rader.join("\n")}`;
 }
 
+export interface UpptrappningsUnderlag {
+  huvudinsikt: boolean;
+  bekraftade: number;
+  djup3Bekraftat: boolean;
+}
+
+/** Minsta antal bekräftade fynd för att analysen inte ska trappas upp. */
+export const MIN_BEKRAFTADE_UTAN_UPPTRAPPNING = 3;
+
+/** Varför analysen bör göras om på den starkare modellen, eller null om den håller. */
+export function upptrappningsSkal(u: UpptrappningsUnderlag): string | null {
+  if (!u.huvudinsikt) return "ingen huvudinsikt";
+  if (!u.djup3Bekraftat) return "inget bekräftat fynd med djup 3";
+  if (u.bekraftade < MIN_BEKRAFTADE_UTAN_UPPTRAPPNING) return `bara ${u.bekraftade} fynd bekräftade`;
+  return null;
+}
+
 export interface AnalysAlternativ {
   /** Modell att använda i stället för MODEL_ANALYS, till exempel vid upptrappning. */
   modell?: string;

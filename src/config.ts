@@ -51,6 +51,9 @@ const schema = z.object({
   ANALYS_MAX_FYND: heltal(6),
   /** true slår ihop observation, insikt och rotorsak till ett fält på högst två meningar. */
   ANALYS_KORT: bool,
+  /** true kör analysen om på MODEL_UPPTRAPPNING när huvudinsikt saknas, inget bekräftat fynd har djup 3 eller färre än tre fynd bekräftas. */
+  UPPTRAPPNING: bool,
+  MODEL_UPPTRAPPNING: z.string().optional().default("claude-opus-5-5"),
 
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: heltal(587),

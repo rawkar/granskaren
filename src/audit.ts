@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { analysera } from "./analyze/analys.js";
+import { analysera, upptrappningsSkal, type AnalysAlternativ } from "./analyze/analys.js";
+import type { Analys } from "./analyze/schema.js";
 import { byggSidUnderlag, type Underlag } from "./analyze/underlag.js";
 import { verifieraFynd } from "./analyze/verifiering.js";
+import { konfig } from "./config.js";
 import { hamtaSajt } from "./crawl/hamta.js";
 import type { Db } from "./db/index.js";
+import type { LankKontroll } from "./measure/lankar.js";
 import {
   arSparrad,
   harFattMejl,
@@ -150,9 +153,49 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     return "granskad";
   }
 
-  // Analys: profil, fynd och huvudinsikt i ett anrop
-  logg.steg("analyserar med språkmodell");
-  const analys = await analysera(d, p.id, underlag);
+  const { utfall, upptrappad } = await analysMedUpptrappning(d, p, underlag, lankar.resultat);
+  const { analys, bekraftade } = utfall;
+
+  const rapport = skrivRapport(d, p.id, underlag, analys.sammanfattning, analys.valskott);
+  sattStatus(d, p.id, "granskad");
+  loggaHandelse(d, p.id, "granskad", { fynd: analys.fynd.length, bekraftade, valskott: analys.valskott, huvudinsikt: !!analys.huvudinsikt, upptrappad });
+  logg.info(`   ${bekraftade} av ${analys.fynd.length} fynd bekräftade. ${analys.huvudinsikt ? "Huvudinsikt finns." : "Ingen huvudinsikt."} Rapport: ${rapport}`);
+  return "granskad";
+}
+
+export interface AnalysUtfall {
+  analys: Analys;
+  bekraftade: number;
+  bekraftadeIds: Set<string>;
+  djup3Bekraftat: boolean;
+}
+
+/**
+ * Analys och verifiering, med upptrappning till MODEL_UPPTRAPPNING om UPPTRAPPNING är satt och den första
+ * analysen saknar huvudinsikt, saknar bekräftat fynd med djup 3 eller får färre än tre fynd bekräftade.
+ * Varje upptrappning loggas som händelsen upptrappning. Returnerar skälet om den trappades upp.
+ */
+export async function analysMedUpptrappning(d: Db, p: Prospekt, underlag: Underlag, lankar: LankKontroll[]): Promise<{ utfall: AnalysUtfall; upptrappad: string | null }> {
+  const k = konfig();
+  let utfall = await analyseraOchVerifiera(d, p, underlag, lankar);
+  const skal = upptrappningsSkal({ huvudinsikt: !!utfall.analys.huvudinsikt, bekraftade: utfall.bekraftade, djup3Bekraftat: utfall.djup3Bekraftat });
+  if (!skal || !k.UPPTRAPPNING || k.MODEL_UPPTRAPPNING === k.MODEL_ANALYS) return { utfall, upptrappad: null };
+
+  logg.info(`   trappar upp till ${k.MODEL_UPPTRAPPNING}: ${skal}`);
+  loggaHandelse(d, p.id, "upptrappning", { skal, fran: k.MODEL_ANALYS, till: k.MODEL_UPPTRAPPNING, bekraftade: utfall.bekraftade, fynd: utfall.analys.fynd.length });
+  d.prepare("DELETE FROM fynd WHERE prospekt_id = ?").run(p.id);
+  d.prepare("DELETE FROM bra WHERE prospekt_id = ?").run(p.id);
+  utfall = await analyseraOchVerifiera(d, p, underlag, lankar, { modell: k.MODEL_UPPTRAPPNING, steg: "analys_upptrappning" });
+  return { utfall, upptrappad: skal };
+}
+
+/**
+ * Analyserar med modellen, sparar profil, bra och fynd, verifierar varje fynd mot rådata och stryker
+ * huvudinsikten om färre än två av dess fynd bekräftas.
+ */
+export async function analyseraOchVerifiera(d: Db, p: Prospekt, underlag: Underlag, lankar: LankKontroll[], alt: AnalysAlternativ = {}): Promise<AnalysUtfall> {
+  logg.steg(`analyserar med språkmodell${alt.modell ? ` (${alt.modell})` : ""}`);
+  const analys = await analysera(d, p.id, underlag, alt);
   uppdateraProspekt(d, p.id, {
     organisationstyp: analys.organisationstyp,
     namn: p.namn ?? analys.organisationsnamn ?? null,
@@ -164,6 +207,7 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
   // Verifiering
   logg.steg(`verifierar ${analys.fynd.length} fynd`);
   let bekraftade = 0;
+  let djup3Bekraftat = false;
   const bekraftadeIds = new Set<string>();
   for (const f of analys.fynd) {
     const radId = sparaFynd(d, {
@@ -193,7 +237,7 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     });
     let v: Awaited<ReturnType<typeof verifieraFynd>>;
     try {
-      v = await verifieraFynd(d, p.id, underlag, f, lankar.resultat);
+      v = await verifieraFynd(d, p.id, underlag, f, lankar);
     } catch (e) {
       v = { verifierad: false, metod: "ingen", not: `Verifieringen misslyckades: ${e instanceof Error ? e.message : String(e)}` };
     }
@@ -201,6 +245,7 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
     if (v.verifierad) {
       bekraftade++;
       bekraftadeIds.add(f.id);
+      if (f.djup === 3) djup3Bekraftat = true;
     }
     logg.info(`   ${v.verifierad ? "ok " : "nej"}  ${f.id} ${f.omrade} djup ${f.djup}  ${f.rubrik}  [${v.metod}] ${v.verifierad ? "" : v.not}`);
   }
@@ -217,12 +262,7 @@ export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ =
       uppdateraProspekt(d, p.id, { huvudinsikt: JSON.stringify(analys.huvudinsikt) });
     }
   }
-
-  const rapport = skrivRapport(d, p.id, underlag, analys.sammanfattning, analys.valskott);
-  sattStatus(d, p.id, "granskad");
-  loggaHandelse(d, p.id, "granskad", { fynd: analys.fynd.length, bekraftade, valskott: analys.valskott, huvudinsikt: !!analys.huvudinsikt });
-  logg.info(`   ${bekraftade} av ${analys.fynd.length} fynd bekräftade. ${analys.huvudinsikt ? "Huvudinsikt finns." : "Ingen huvudinsikt."} Rapport: ${rapport}`);
-  return "granskad";
+  return { analys, bekraftade, bekraftadeIds, djup3Bekraftat };
 }
 
 function hoppa(d: Db, p: Prospekt, orsak: string): "hoppad" {

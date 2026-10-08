@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { omfangsText, STANDARD_MAX_FYND } from "../src/analyze/analys.js";
+import { omfangsText, STANDARD_MAX_FYND, upptrappningsSkal } from "../src/analyze/analys.js";
+
+describe("upptrappning", () => {
+  it("trappar inte upp när analysen håller", () => {
+    expect(upptrappningsSkal({ huvudinsikt: true, bekraftade: 3, djup3Bekraftat: true })).toBeNull();
+  });
+  it("trappar upp utan huvudinsikt, utan djup 3 eller med färre än tre bekräftade", () => {
+    expect(upptrappningsSkal({ huvudinsikt: false, bekraftade: 4, djup3Bekraftat: true })).toBe("ingen huvudinsikt");
+    expect(upptrappningsSkal({ huvudinsikt: true, bekraftade: 4, djup3Bekraftat: false })).toBe("inget bekräftat fynd med djup 3");
+    expect(upptrappningsSkal({ huvudinsikt: true, bekraftade: 2, djup3Bekraftat: true })).toBe("bara 2 fynd bekräftade");
+  });
+});
 import { AnalysKortSchema, franKortAnalys } from "../src/analyze/schema.js";
 
 describe("omfång för analysen", () => {
