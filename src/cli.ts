@@ -15,6 +15,21 @@ import { allaSegment, skapaSegment } from "./discover/segment.js";
 import { discover } from "./discover/discover.js";
 import { utfallPerKundtyp, weekly } from "./report/weekly.js";
 import { avbrytPaus, pausad, tillampaPaus } from "./report/vakt.js";
+import {
+  analysIn,
+  apiAnvandningSedan,
+  discoverIn,
+  discoverPaket,
+  forbered,
+  forfilterIn,
+  grindIn,
+  idag as passIdag,
+  passMapp,
+  senasteKostnadId,
+  statusRader,
+  utkastIn,
+  verifieringIn,
+} from "./pass/pass.js";
 import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
@@ -239,6 +254,144 @@ program
   .action(async (o: { enGang: boolean; utanDiscover: boolean }) => {
     konfig();
     await run(db(), { enGang: o.enGang, utanDiscover: o.utanDiscover });
+  });
+
+// ---------- pass: dagens körning i etapper utan API ----------
+
+const pass = program
+  .command("pass")
+  .description("Dagens körning i etapper utan API: verktyget hämtar, mäter, kontrollerar och skickar, underagenter i en Claude-session gör modellstegen. Kör med MODELLVAG=session i miljön.");
+
+function passStart(): { d: ReturnType<typeof db>; datum: string } {
+  const k = konfig();
+  if (k.MODELLVAG !== "session") logg.varning("MODELLVAG är inte session: API-nyckeln är inläst i miljön. Kör passet med MODELLVAG=session.");
+  return { d: db(), datum: "" };
+}
+
+function skrivInUtfall(doman: string, u: import("./pass/pass.js").InUtfall): void {
+  if (u.ok) {
+    console.log(`UTFALL ok ${doman} nasta=${u.nasta}  ${u.meddelande}`);
+    return;
+  }
+  console.log(`UTFALL ${u.nyttForsok ? "nytt_forsok" : "avbrutet"} ${doman}  ${u.fel}`);
+  process.exitCode = u.nyttForsok ? 2 : 3;
+}
+
+pass
+  .command("forbered")
+  .description("Etapp a: hämtning, mätning och arbetspaket per sajt i data/pass/<datum>/<domän>/")
+  .option("--datum <d>", "passets datum, YYYY-MM-DD", passIdag())
+  .option("--sajter <lista>", "bara dessa domäner, kommaseparerat (annars sajter med status ny eller kvalificerad)")
+  .option("--antal <n>", "högsta antal sajter", "8")
+  .option("--befintligt-underlag", "använd sparat underlag i stället för att hämta om sajterna", false)
+  .option("--utan-lighthouse", "hoppa över Lighthouse", false)
+  .action(async (o: { datum: string; sajter?: string; antal: string; befintligtUnderlag: boolean; utanLighthouse: boolean }) => {
+    const { d } = passStart();
+    const lista = await forbered(d, {
+      datum: o.datum,
+      sajter: o.sajter ? o.sajter.split(",").map((s) => normaliseraDoman(s.trim()) ?? s.trim()).filter(Boolean) : undefined,
+      antal: Math.max(1, Number.parseInt(o.antal, 10) || 8),
+      befintligtUnderlag: o.befintligtUnderlag,
+      utanLighthouse: o.utanLighthouse,
+    });
+    for (const rad of statusRader(o.datum)) console.log(rad);
+    console.log(`Arbetspaket: ${lista.filter((s) => s.steg === "forberedd").length} förberedda, ${lista.filter((s) => s.steg === "hoppad").length} hoppade. Mapp: ${passMapp(o.datum)}`);
+  });
+
+pass
+  .command("analys-in <doman>")
+  .description("Läser analys.json från underagenten, sparar fynd, kör kodkontrollerna och skriver verifieringspaket")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((doman: string, o: { datum: string }) => {
+    const { d } = passStart();
+    skrivInUtfall(doman, analysIn(d, o.datum, normaliseraDoman(doman) ?? doman));
+  });
+
+pass
+  .command("verifiering-in <doman>")
+  .description("Läser verifiering.json, slår ihop med kodkontrollen, avslutar granskningen och skriver utkastpaket")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((doman: string, o: { datum: string }) => {
+    const { d } = passStart();
+    skrivInUtfall(doman, verifieringIn(d, o.datum, normaliseraDoman(doman) ?? doman));
+  });
+
+pass
+  .command("utkast-in <doman>")
+  .description("Läser utkast.json, kör grindens kodkontroller och skriver grindpaket, eller begär nytt utkast")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((doman: string, o: { datum: string }) => {
+    const { d } = passStart();
+    skrivInUtfall(doman, utkastIn(d, o.datum, normaliseraDoman(doman) ?? doman));
+  });
+
+pass
+  .command("grind-in <doman>")
+  .description("Läser grind.json, avgör utfallet och sparar mejlet i kön, granskningskön eller som stoppat")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((doman: string, o: { datum: string }) => {
+    const { d } = passStart();
+    skrivInUtfall(doman, grindIn(d, o.datum, normaliseraDoman(doman) ?? doman));
+  });
+
+pass
+  .command("status")
+  .description("Visar var varje sajt i passet står")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((o: { datum: string }) => {
+    konfig();
+    for (const rad of statusRader(o.datum)) console.log(rad);
+  });
+
+pass
+  .command("discover-paket")
+  .description("Skriver uppgiften till webbsökningen för ett segment. Sessionen söker och sparar träffarna i traffar.json i samma mapp")
+  .requiredOption("--segment <id>", "segmentets id")
+  .option("--antal <n>", "önskat antal träffar", "10")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((o: { segment: string; antal: string; datum: string }) => {
+    const { d } = passStart();
+    const r = discoverPaket(d, o.datum, Number.parseInt(o.segment, 10), Math.max(1, Number.parseInt(o.antal, 10) || 10));
+    console.log(`Uppgift i ${r.mapp}: discover-system.md och discover-uppgift.md. Högst ${r.maxSok} sökningar, ${r.antal} träffar. Skriv träffarna som JSON-lista [{namn, url, varfor}] i traffar.json i mappen.`);
+  });
+
+pass
+  .command("discover-in")
+  .description("Läser träffarna, sparar dem i soktraffar, hämtar kandidaterna, kör förfiltrets kodregler och skriver förfilterpaket")
+  .requiredOption("--segment <id>", "segmentets id")
+  .option("--fil <sokvag>", "fil med träffarna (annars traffar.json i segmentets mapp)")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action(async (o: { segment: string; fil?: string; datum: string }) => {
+    const { d } = passStart();
+    const r = await discoverIn(d, o.datum, Number.parseInt(o.segment, 10), o.fil);
+    console.log(`Träffar: ${r.traffar}, bortvalda av kod: ${r.bortvaldaAvKod}, till förfilter: ${r.tillForfilter.length}${r.tillForfilter.length ? ` (${r.tillForfilter.join(", ")})` : ""}`);
+  });
+
+pass
+  .command("forfilter-in")
+  .description("Läser underagentens förfiltersvar och lägger godkända kandidater som prospekt")
+  .requiredOption("--segment <id>", "segmentets id")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((o: { segment: string; datum: string }) => {
+    const { d } = passStart();
+    const r = forfilterIn(d, o.datum, Number.parseInt(o.segment, 10));
+    console.log(`Godkända: ${r.godkanda.length}${r.godkanda.length ? ` (${r.godkanda.join("; ")})` : ""}. Bortvalda: ${r.bortvalda.length}. Utan giltigt svar: ${r.saknas.length}${r.saknas.length ? ` (${r.saknas.join("; ")})` : ""}`);
+  });
+
+pass
+  .command("api-kontroll")
+  .description("Visar senaste raden i kostnadsloggen, och med --sedan hur många API-anrop som loggats efter den")
+  .option("--sedan <id>", "kostnadsrad att räkna från")
+  .action((o: { sedan?: string }) => {
+    const k = konfig();
+    const d = db();
+    const nyckel = process.env.ANTHROPIC_API_KEY ? "INLÄST" : "inte inläst";
+    if (o.sedan) {
+      const r = apiAnvandningSedan(d, Number.parseInt(o.sedan, 10));
+      console.log(`MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. API-anrop loggade efter rad ${o.sedan}: ${r.anrop} (${r.usd.toFixed(4)} USD).`);
+      return;
+    }
+    console.log(`MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. Senaste kostnadsrad: ${senasteKostnadId(d)}.`);
   });
 
 program
