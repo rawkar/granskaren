@@ -18,8 +18,9 @@ Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägra
 ## 0. Innan du börjar
 
 1. Säg till Rawaz att läsa av claude.ai/settings/usage nu, så att kvoten kan jämföras efter passet.
-2. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
-3. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
+2. Kontrollera `.env`: `RUN_PAUSAD=true` (så att den schemalagda API-körningen inte går samma dag) och `SANDLAGE=granska` (så att alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
+3. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
+4. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
 
 ## 1. Förbered
 
@@ -69,7 +70,7 @@ Discover görs i sessionen med din egen webbsökning, inte av en underagent.
 MODELLVAG=session npx tsx src/cli.ts send
 ```
 
-Samma utskick som i dag: köade mejl inom sändfönstret och dagens tak, med slumpad paus mellan mejlen. Mejl i granskningskön skickas inte förrän Rawaz godkänt dem med `review`.
+Samma utskick som i dag: köade mejl inom sändfönstret och dagens tak, med slumpad paus mellan mejlen. Mejl i granskningskön skickas inte förrän Rawaz godkänt dem med `review`. Med `SANDLAGE=granska` hamnar alla mejl i granskningskön, så `send` har då inget att skicka förrän Rawaz har gått igenom kön.
 
 ## 5. Efter passet
 

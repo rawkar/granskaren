@@ -70,6 +70,10 @@ export async function run(d: Db, alt: RunAlternativ = {}): Promise<void> {
 
 async function runInre(d: Db, alt: RunAlternativ): Promise<void> {
   const k = konfig();
+  if (k.RUN_PAUSAD) {
+    logg.varning("RUN_PAUSAD=true i .env: API-körningen är pausad, dagens pass görs i en session med /dagens. Inget görs.");
+    return;
+  }
   logg.info(`run startar. Läge ${k.SANDLAGE}, torrkörning ${k.TORRKORNING ? "PÅ" : "av"}, tak ${k.MAX_MEJL_PER_DAG} per dag, fönster ${k.SANDFONSTER_START} till ${k.SANDFONSTER_SLUT}, paus ${k.PAUS_MIN_MINUTER} till ${k.PAUS_MAX_MINUTER} minuter.`);
   if (k.SANDLAGE !== "auto") logg.varning("SANDLAGE är granska. Utkast hamnar i granskningskön och inget skickas förrän du godkänner dem.");
   await vaktaOchPausa(d);

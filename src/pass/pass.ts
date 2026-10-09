@@ -526,7 +526,7 @@ export async function hamtaHtml(url: string, timeoutMs = 20000): Promise<string 
 }
 
 /** Plattformar och kataloger som aldrig är en kandidats egen sajt. */
-const INTE_EGEN_SAJT = /(^|\.)(facebook|instagram|linkedin|youtube|vimeo|twitter|x|tiktok|pinterest|google|wikipedia|hitta|eniro|allabolag|bokadirekt|reco|ratsit|merinfo|bolagsfakta|svenskakyrkan|behance|dribbble|etsy|tradera|blocket|apple|microsoft|wordpress|wix|squarespace|godaddy|one|loopia|cloudflare|gstatic|googleapis|facebook\.net|addthis|sharethis|mailchimp|spotify|soundcloud|bandcamp|issuu)\.[a-z]+$/i;
+const INTE_EGEN_SAJT = /(^|\.)(facebook|instagram|linkedin|youtube|vimeo|twitter|x|tiktok|pinterest|google|wikipedia|hitta|eniro|allabolag|bokadirekt|reco|ratsit|merinfo|bolagsfakta|svenskakyrkan|behance|dribbble|etsy|tradera|blocket|apple|microsoft|wordpress|wix|squarespace|godaddy|one|loopia|cloudflare|gstatic|googleapis|facebook\.net|addthis|sharethis|mailchimp|spotify|soundcloud|bandcamp|issuu|cookiedatabase|readspeaker|sensus|studieframjandet|abf|bilda|nortic|billetto|tickster|ticketmaster|kulturbiljetter|swish|klarna|paypal|stripe)\.[a-z]+$/i;
 
 /**
  * Katalogvägen: hämtar en medlemslista eller ett register och plockar ut de externa webbplatser den länkar till.
