@@ -32,6 +32,7 @@ import {
   utkastPaket,
   verifieringIn,
 } from "./pass/pass.js";
+import { kvotEfter, kvotFore, lasKvotLogg, rymsSajter } from "./pass/kvot.js";
 import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
@@ -420,6 +421,35 @@ pass
       return;
     }
     console.log(`MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. Senaste kostnadsrad: ${senasteKostnadId(d)}.`);
+  });
+
+pass
+  .command("kvot")
+  .description("Kvotmätning: --fore <andel> sparar hur mycket av sessionsgränsen som är kvar när passet börjar, --efter <andel> loggar förbrukningen per sajt i data/jamforelse/kvot-logg.csv och visar snittet")
+  .option("--fore <andel>", "andel kvar av sessionsgränsen före passet, i procent")
+  .option("--efter <andel>", "andel kvar av sessionsgränsen efter passet, i procent")
+  .option("--kommentar <text>", "anteckning på raden, till exempel plan eller antal agenter", "")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((o: { fore?: string; efter?: string; kommentar: string; datum: string }) => {
+    konfig();
+    if (o.fore !== undefined) {
+      const fil = kvotFore(o.datum, Number(o.fore));
+      const alla = lasKvotLogg().filter((r) => r.sajter > 0);
+      const snitt = alla.length ? alla.reduce((s, r) => s + r.per_sajt, 0) / alla.length : 0;
+      console.log(`Sparat: ${o.fore} procent kvar före passet (${fil}).`);
+      if (snitt > 0) console.log(`Snitt hittills: ${snitt.toFixed(1)} procentenheter per sajt över ${alla.length} pass. Med marginal ryms ${rymsSajter(Number(o.fore), snitt)} sajter.`);
+      else console.log("Ingen tidigare mätning: välj antal sajter enligt tabellen i /dagens.");
+      return;
+    }
+    if (o.efter !== undefined) {
+      const r = kvotEfter(o.datum, Number(o.efter), o.kommentar);
+      console.log(`Passet ${r.rad.datum}: ${r.rad.sajter} sajter (${r.rad.klara} klara), ${r.rad.andel_fore} -> ${r.rad.andel_efter} procent kvar, förbrukning ${r.rad.forbrukning} procentenheter, ${r.rad.per_sajt} per sajt. Loggat i ${r.fil}.`);
+      console.log(`Snitt över ${r.antalPass} pass: ${r.snitt} procentenheter per sajt. Vid 100 procent kvar ryms med marginal ${rymsSajter(100, r.snitt)} sajter.`);
+      return;
+    }
+    const alla = lasKvotLogg();
+    if (!alla.length) console.log("Ingen kvotlogg ännu.");
+    for (const r of alla) console.log(`${r.datum}: ${r.sajter} sajter, ${r.andel_fore} -> ${r.andel_efter}, ${r.per_sajt} per sajt${r.kommentar ? ` (${r.kommentar})` : ""}`);
   });
 
 program

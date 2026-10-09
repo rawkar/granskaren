@@ -17,7 +17,13 @@ Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägra
 
 ## 0. Innan du börjar
 
-1. Sessionsgränsen. Be Rawaz läsa av `/usage` (eller claude.ai/settings/usage) och säga hur stor andel av sessionsgränsen som är kvar, om han inte redan angav den som argument (`/dagens 60` betyder 60 procent kvar). Välj antalet sajter efter det, hellre färre sajter än ett pass som avbryts mitt i:
+1. Sessionsgränsen och kvotmätningen. Argumenten till /dagens är `/dagens <andel kvar> [antal sajter]`, till exempel `/dagens 100 2`. Saknas andelen, be Rawaz läsa av `/usage` och säga hur stor andel av sessionsgränsen som är kvar. Spara den direkt:
+
+   ```
+   MODELLVAG=session npx tsx src/cli.ts pass kvot --fore <andel>
+   ```
+
+   Kommandot visar snittförbrukningen per sajt från tidigare pass (data/jamforelse/kvot-logg.csv) och hur många sajter som ryms med marginal. Finns ett snitt, använd det talet som `--antal` (eller det antal Rawaz angav om det är lägre). Finns inget snitt ännu, välj efter tabellen, hellre färre sajter än ett pass som avbryts mitt i:
 
    | Kvar av sessionsgränsen | Antal sajter (`--antal`) |
    |---|---|
@@ -27,10 +33,9 @@ Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägra
    | under 20 procent | kör inte, säg när gränsen återställs |
 
    Mätningen den 9 oktober 2026: ett pass på fem sajter drog 1,3 miljoner tokens i cache-skrivning och 4,6 miljoner i cache-läsning hos underagenterna, alltså ungefär 1,2 miljoner tokens per sajt. Passledarens egna anrop kostar därutöver lika mycket som dess sammanhang är stort gånger antalet anrop, så kör passet i en ny session med litet sammanhang, aldrig i en session som redan har arbetat länge. Se data/jamforelse/2026-10-09-kvot.md.
-2. Säg till Rawaz att läsa av claude.ai/settings/usage nu, så att kvoten kan jämföras efter passet.
-3. Kontrollera `.env`: `RUN_PAUSAD=true` (så att den schemalagda API-körningen inte går samma dag) och `SANDLAGE=granska` (så att alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
-4. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
-5. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
+2. Kontrollera `.env`: `RUN_PAUSAD=true` (så att den schemalagda API-körningen inte går samma dag) och `SANDLAGE=granska` (så att alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
+3. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
+4. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
 
 ## 1. Förbered
 
@@ -86,7 +91,11 @@ Samma utskick som i dag: köade mejl inom sändfönstret och dagens tak, med slu
 
 1. `pass status` och sammanfatta: per sajt antal fynd, bekräftade, utfall i grinden och antal försök.
 2. `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll --sedan <numret från steg 0>`. Det ska stå 0 API-anrop. Visa raden för Rawaz.
-3. Säg till Rawaz att läsa av claude.ai/settings/usage igen och notera hur mycket passet drog.
+3. Be Rawaz läsa av `/usage` igen och kör `MODELLVAG=session npx tsx src/cli.ts pass kvot --efter <andel> --kommentar "<plan, antal agenter samtidigt>"`. Kommandot loggar förbrukningen per sajt i data/jamforelse/kvot-logg.csv och visar snittet över alla pass samt hur många sajter som ryms vid full kvot. Visa raden för Rawaz. Snittet styr antalet sajter i nästa pass (steg 0).
+
+## Mätpass på två sajter
+
+Första passet på en ny plan eller efter en större ändring körs som mätpass: `/dagens <andel kvar> 2` i en ny session utan annat arbete. Allt annat är som vanligt (SANDLAGE=granska, alla mejl till granskningskön, RUN_PAUSAD=true, högst två agenter samtidigt). Efter passet ger `pass kvot --efter` förbrukningen per sajt, och det talet används för att sätta antalet sajter i kommande pass. Mätpasset den 12 oktober 2026 körs av Rawaz själv i en ny session.
 
 ## Om sessionsgränsen slår till
 
