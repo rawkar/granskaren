@@ -402,7 +402,7 @@ export function utkastPaket(d: Db, datum: string, doman: string, igen = false): 
 
 function skrivUtkastPaket(mapp: string, p: Prospekt, f: UtkastForberett, tidigareFel: string[]): void {
   fs.writeFileSync(path.join(mapp, "utkast-system.md"), utkastSystem(f.flerFynd), "utf8");
-  fs.writeFileSync(path.join(mapp, "utkast-uppgift.md"), utkastText(utkastUppgifter(p, f.valda, f.huvudinsikt, f.profil, f.tilltal, tidigareFel, f.flerFynd)), "utf8");
+  fs.writeFileSync(path.join(mapp, "utkast-uppgift.md"), utkastText(utkastUppgifter(p, f.valda, f.huvudinsikt, f.profil, f.tilltal, tidigareFel, f.flerFynd, f.huvudfynd)), "utf8");
   skrivJson(path.join(mapp, "utkast-schema.json"), jsonSchema(UtkastSchema));
   for (const fil of ["utkast.json", "grind.json", "grind-fel.txt"]) if (fs.existsSync(path.join(mapp, fil))) fs.unlinkSync(path.join(mapp, fil));
   if (tidigareFel.length) skrivFel(mapp, "utkast-fel.txt", `Förra utkastet stoppades av grinden:\n${tidigareFel.map((x) => `- ${x}`).join("\n")}\n\nSkriv ett nytt utkast. Uppgiften i utkast-uppgift.md innehåller också skälen.`);

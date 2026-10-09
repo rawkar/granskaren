@@ -14,8 +14,8 @@ describe("tillägg till mejlprompten", () => {
     expect(langdText(190, 210)).toContain("150 till 210");
     expect(langdText(0, 210)).toContain("Sikta på 180 ord");
   });
-  it("tillåter meningen om fler fynd bara när fler fynd finns", () => {
-    expect(flerFyndText(2)).toContain("2 bekräftade fynd till");
+  it("säger att programmet skriver meningen om fler fynd när inställningen är på", () => {
+    expect(flerFyndText(2)).toContain("programmet självt");
     expect(flerFyndText(0)).toContain("Skriv inte att Rawaz såg fler saker");
   });
 });
@@ -189,7 +189,7 @@ Vänliga hälsningar`;
     // Meningen om fler fynd får bara finnas när det finns fler bekräftade fynd
     const medFler = ok.replace("Jag hjälper gärna", "Jag såg fler saker som går att förbättra på sajten och dem berättar jag gärna om i ett samtal. Jag hjälper gärna");
     expect(tillaggsfel(medFler, fyndOk, 0)).toContainEqual(expect.stringMatching(/påstår att det finns fler saker/));
-    expect(tillaggsfel(medFler, fyndOk, 2)).toEqual([]);
+    expect(tillaggsfel(medFler, fyndOk, 2)).toContainEqual(expect.stringMatching(/skriver själv att det finns fler saker/));
     expect(tillaggsfel(medFler, fyndOk)).toEqual([]);
     expect(tillaggsfel(ok, fyndOk, 0)).toEqual([]);
   });

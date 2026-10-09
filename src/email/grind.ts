@@ -37,8 +37,11 @@ export function byggAmne(mall: string, doman: string, namn: string | null): stri
   return amne;
 }
 
-/** Omdömen om mottagarens formuleringar som aldrig får förekomma. */
-const OMDOMEN = /som helst|intetsägande|allmän(t|na)? (rad|rubrik|formulering|slogan)|bara en slogan|säger (inget|ingenting)|klyscha|tom fras/i;
+/**
+ * Omdömen om mottagarens formuleringar som aldrig får förekomma. "Säger inget om", "nämner inte" och "står inte"
+ * är beskrivningar av innehåll som saknas på en sida och är tillåtna; bara "säger inget" utan "om" är ett omdöme.
+ */
+const OMDOMEN = /som helst|intetsägande|allmän(t|na)? (rad|rubrik|formulering|slogan)|bara en slogan|säger (inget|ingenting)(?! om)|klyscha|tom fras/i;
 
 /**
  * Språkregler som går att kontrollera med kod. Returnerar en lista med fel.
@@ -112,6 +115,14 @@ export function lasForbjudnaFraser(): string[] {
 }
 
 export const MAX_ORD_HUVUDPOANG = 12;
+/** En mening med högst så många ord räknas som kort i rytmkontrollen. */
+export const KORT_MENING = 8;
+/** Fler meningar än så i ett stycke stoppas: det som hör ihop ska bindas ihop. */
+export const MAX_MENINGAR_PER_STYCKE = 4;
+
+/** Ord som gör att en mening handlar om hur besökare beter sig. */
+const BETEENDE = /besök|läsare|läser|kund|den som|de som|få som|många|(?<![a-zåäö])dem(?![a-zåäö])|någon|hittar|klickar|skrollar|når|hinner|letar|jämför|stannar|väljer|bokar|tvekar|hör av sig/i;
+const TVARSAKERT = /(?<![a-zåäö])(aldrig|alltid)(?![a-zåäö])/i;
 
 /** Delar brödtexten i stycken utan hälsningsraden. */
 export function stycken(brodtext: string): string[] {
@@ -123,9 +134,10 @@ export function stycken(brodtext: string): string[] {
   return alla.filter((s, i) => !(i === 0 && /^hej\b/i.test(s)));
 }
 
-function meningar(stycke: string): string[] {
+/** Delar ett stycke i meningar. Punkt följd av liten bokstav (fil. kand., t.ex.) avslutar ingen mening. */
+export function meningar(stycke: string): string[] {
   return stycke
-    .split(/(?<=[.!?])\s+/)
+    .split(/(?<=[.!?])\s+(?=[A-ZÅÄÖ0-9"“(])/)
     .map((m) => m.trim())
     .filter(Boolean);
 }
@@ -159,19 +171,119 @@ export function tonfel(brodtext: string, forbjudna: string[] = lasForbjudnaFrase
     if (ord > MAX_ORD_HUVUDPOANG) fel.push(`huvudpoängens första mening är ${ord} ord, högst ${MAX_ORD_HUVUDPOANG}`);
     if (/den som jämför/i.test(m2[0])) fel.push('huvudpoängens första mening har "den som jämför" som subjekt');
   }
+  fel.push(...rytmfel(s.slice(1)), ...tvarsakerhetsfel(s.slice(1)));
   return fel;
 }
 
 /**
+ * Rytmen: högst två korta meningar i rad och högst fyra meningar i ett stycke. Det konkreta exemplet är ett eget
+ * stycke med en mening och berörs inte.
+ */
+export function rytmfel(stycken: string[]): string[] {
+  const fel: string[] = [];
+  for (const st of stycken) {
+    const m = meningar(st);
+    if (m.length > MAX_MENINGAR_PER_STYCKE) fel.push(`ett stycke har ${m.length} meningar, högst ${MAX_MENINGAR_PER_STYCKE}, bind ihop det som hör ihop ("${m[0]}")`);
+    let korta = 0;
+    for (const mening of m) {
+      korta = antalOrd(mening) <= KORT_MENING ? korta + 1 : 0;
+      if (korta === 3) {
+        fel.push(`tre korta meningar i rad, högst två ("${mening}")`);
+        break;
+      }
+    }
+  }
+  return fel;
+}
+
+/** Påståenden om hur besökare beter sig skrivs försiktigt: aldrig och alltid stoppas i sådana meningar. */
+export function tvarsakerhetsfel(stycken: string[]): string[] {
+  const fel: string[] = [];
+  for (const st of stycken) {
+    for (const m of meningar(st)) {
+      if (TVARSAKERT.test(m) && BETEENDE.test(m)) fel.push(`för tvärsäkert om hur besökare beter sig ("${m}"), skriv sällan, ofta, många eller få`);
+    }
+  }
+  return fel;
+}
+
+/** Ord som förekommer i nästan alla fynd och därför inte säger vilket fynd ett stycke handlar om. */
+const ALLMANNA_ORD = new Set([
+  "startsidan", "startsida", "sidan", "sidor", "sidorna", "undersidor", "undersidorna", "webbplats", "webbplatsen", "sajten", "besökare", "besökaren", "texten",
+  "finns", "står", "saknar", "saknas", "innehåller", "nämner", "visar", "berättar", "syns", "mellan", "också", "eller", "endast", "ingen", "inget", "ingenting",
+  "någon", "något", "några", "redan", "sedan", "efter", "genom", "under", "vilket", "vilka", "detta", "denna", "dessa", "skulle", "kunna", "gärna", "bara",
+  "inte", "utan", "från", "till", "hela", "andra", "första", "samma", "direkt", "ligger", "vara", "blir", "vill", "mycket", "därför", "eftersom", "kommer",
+  "behöver", "istället", "stället", "längre", "högst", "överst", "nedanför", "ovanför", "bredvid", "exempel", "mening", "meningen", "rubrik", "rubriken",
+  "huvudrubrik", "huvudrubriken", "knapp", "knappen", "knappar", "knapparna", "länk", "länken", "länkar", "mottagaren", "lättare", "svårare", "idag",
+]);
+
+/** Ordstammar (första sex bokstäverna i ord på minst fem) som säger vad en text handlar om. */
+function stammar(text: string): Set<string> {
+  return new Set(
+    normaliseraText(text.replace(/https?:\/\/\S+/g, " "))
+      .split(/[^a-zåäöé]+/)
+      .filter((w) => w.length >= 5 && !ALLMANNA_ORD.has(w))
+      .map((w) => w.slice(0, 6)),
+  );
+}
+
+/**
+ * Huvudpoängen (andra stycket) ska handla om huvudfyndet: det fynd som har störst betydelse för mottagaren.
+ * Stycket måste dela minst två ordstammar med huvudfyndet och inte fler med något annat av fynden.
+ */
+export function huvudpoangfel(brodtext: string, fynd: FyndRad[], huvudId: string | null | undefined): string[] {
+  const huvud = huvudId ? fynd.find((f) => f.fynd_id === huvudId) : undefined;
+  if (!huvud) return [];
+  const stycke = stammar(stycken(brodtext)[1] ?? "");
+  const text = (f: FyndRad) => `${f.rubrik} ${f.observation} ${f.insikt ?? ""} ${f.effekt} ${f.atgard} ${f.belagg_varde} ${f.belagg2_varde ?? ""} ${f.forslag_konkret ?? ""}`;
+  const traffar = (f: FyndRad) => [...stammar(text(f))].filter((st) => stycke.has(st)).length;
+  const egna = traffar(huvud);
+  const basta = Math.max(0, ...fynd.filter((f) => f !== huvud).map(traffar));
+  if (egna < 2 || basta > egna) return [`huvudpoängen (andra stycket) handlar inte om huvudfyndet "${huvud.rubrik}"`];
+  return [];
+}
+
+/** Ord som gör en mening till ett förslag snarare än en beskrivning av vad som står på sajten i dag. */
+const FORSLAGSORD = /skulle|kunde|kan |förslag|exempel|göra mer nytta|i stället|istället|hellre|som (huvud)?rubrik|på knappen/i;
+
+/**
+ * Det konkreta exemplet får inte upprepa ett förslag som redan står i texten med samma ord: fem ord i följd ur
+ * exemplet (hela exemplet om det är kortare, men minst fyra ord) får inte finnas i en annan mening som är ett förslag.
+ */
+export function exempelfel(brodtext: string, forslag: string[]): string[] {
+  const rader = brodtext.split(/\r?\n/);
+  const rensa = (t: string) => normaliseraText(t).replace(/[.,;:!?"“”]/g, "");
+  for (const fo of forslag) {
+    const n = rensa(fo);
+    const idx = rader.findIndex((r) => rensa(r) === n);
+    if (idx < 0) continue;
+    const ord = n.split(" ").filter(Boolean);
+    if (ord.length < 4) continue;
+    const bredd = Math.min(5, ord.length);
+    const andraMeningar = rader
+      .filter((_, i) => i !== idx)
+      .flatMap((r) => meningar(r))
+      .filter((m) => FORSLAGSORD.test(m))
+      .map(rensa);
+    for (let i = 0; i + bredd <= ord.length; i++) {
+      const fras = ord.slice(i, i + bredd).join(" ");
+      if (andraMeningar.some((m) => m.includes(fras))) return [`det konkreta exemplet upprepar ett förslag som redan står i texten med samma ord ("${fras}")`];
+    }
+  }
+  return [];
+}
+
+/**
  * Regler från tillägget som kontrolleras med kod: fyndens djup, konkret förslag på egen rad, siffror.
- * flerFynd är antalet bekräftade fynd utanför mejlet när MEJL_FLER_FYND är på (null när den är av): står det 0
- * får mejlet inte påstå att det finns fler saker att förbättra.
+ * flerFynd är antalet bekräftade fynd utanför mejlet när MEJL_FLER_FYND är på (null när den är av). Är den på
+ * skriver programmet självt meningen om fler fynd, så modellen får inte skriva någon sådan mening.
  */
 export function tillaggsfel(brodtext: string, fynd: FyndRad[], flerFynd: number | null = null): string[] {
   const fel: string[] = [];
-  if (flerFynd === 0) {
+  if (flerFynd !== null) {
     const traff = brodtext.match(FLER_FYND);
-    if (traff) fel.push(`påstår att det finns fler saker att förbättra ("${traff[0]}") fast inga fler fynd är bekräftade`);
+    if (traff && flerFynd === 0) fel.push(`påstår att det finns fler saker att förbättra ("${traff[0]}") fast inga fler fynd är bekräftade`);
+    else if (traff) fel.push(`skriver själv att det finns fler saker att förbättra ("${traff[0]}"), den meningen lägger programmet till`);
   }
   if (!fynd.some((f) => f.djup === 3)) fel.push("inget av fynden har djup 3");
   if (fynd.filter((f) => f.djup === 1).length > 1) fel.push("fler än ett fynd med djup 1");
@@ -207,6 +319,8 @@ export interface GrindAlternativ {
   kallor?: Faktakallor | null;
   /** Fel som uppstod innan grinden, till exempel att modellen skrev presentationen själv. */
   extraFel?: string[];
+  /** fynd_id för huvudfyndet, det mejlet ska öppna med. Utan det görs ingen kontroll av huvudpoängen. */
+  huvudfynd?: string | null;
 }
 
 /** Grindens kodkontroller: språkregler, tilläggets regler, faktaspårning, ämnesrad, antal fynd, verifiering, mottagare och spärrlista. */
@@ -216,6 +330,8 @@ export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext
   fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
   fel.push(...tillaggsfel(utkast.brodtext, fynd, alt.flerFynd ?? null));
   fel.push(...tonfel(utkast.brodtext));
+  fel.push(...huvudpoangfel(utkast.brodtext, fynd, alt.huvudfynd));
+  fel.push(...exempelfel(utkast.brodtext, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x)));
   if (alt.kallor) fel.push(...faktafel(utkast.brodtext, alt.kallor));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);

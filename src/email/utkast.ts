@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { lasPrompt, strukturerat } from "../analyze/klient.js";
 import type { Huvudinsikt, Profil } from "../analyze/schema.js";
-import { konfig } from "../config.js";
+import { konfig, PROMPT_DIR } from "../config.js";
 import type { Db } from "../db/index.js";
 import {
   braForProspekt,
@@ -91,19 +91,49 @@ export function langdText(ordmal: number, maxOrd: number): string {
 }
 
 /**
- * Tillägg till mejlprompten om meningen före erbjudandet (MEJL_FLER_FYND). flerFynd är antalet bekräftade fynd
- * som inte används i mejlet, eller null när inställningen är av. Meningen får bara skrivas när det finns fler fynd.
+ * Tillägg till mejlprompten när MEJL_FLER_FYND är på: programmet lägger självt till meningen om fler fynd, så
+ * modellen ska inte skriva någon sådan mening. flerFynd är antalet bekräftade fynd som inte används i mejlet,
+ * eller null när inställningen är av.
  */
 export function flerFyndText(flerFynd: number | null): string {
   if (flerFynd === null) return "";
-  if (flerFynd <= 0) {
-    return "\n\n## Fler fynd\n\nDet finns inga fler bekräftade fynd än de som står i uppgifterna. Skriv inte att Rawaz såg fler saker som går att förbättra.";
+  return "\n\n## Fler fynd\n\nSkriv inte att Rawaz såg fler saker på sajten som går att förbättra. Finns det fler bekräftade fynd lägger programmet självt till en mening om det före erbjudandet, och den räknas inte i ordgränsen.";
+}
+
+/** Läser prompts/fler-fynd.md: rubrikerna "## du" och "## ni" följda av varianter på rader som börjar med "- ". */
+export function lasFlerFyndMeningar(): Record<Tilltal, string[]> {
+  const ut: Record<Tilltal, string[]> = { du: [], ni: [] };
+  const fil = path.join(PROMPT_DIR, "fler-fynd.md");
+  if (!fs.existsSync(fil)) return ut;
+  let aktuell: Tilltal | null = null;
+  for (const rad of fs.readFileSync(fil, "utf8").split(/\r?\n/)) {
+    const r = rad.trim();
+    const rubrik = r.match(/^##\s+(du|ni)\b/i);
+    if (rubrik) aktuell = rubrik[1].toLowerCase() as Tilltal;
+    else if (aktuell && r.startsWith("- ")) ut[aktuell].push(r.slice(2).trim());
   }
-  return [
-    "\n\n## Fler fynd",
-    "",
-    `Rawaz har ${flerFynd} bekräftade fynd till som inte tas upp i mejlet. Lägg omedelbart före erbjudandet om hjälp en egen mening med innebörden att han såg fler saker på sajten som går att förbättra och gärna berättar om dem i ett samtal. Nämn inte vad de handlar om och inget antal. Följ tilltalet och språkreglerna. Meningen ska vara skriven med egna ord för just det här mejlet: använd aldrig frasen "fler saker som går att förbättra" och skriv inte av exemplet. Exempel på nivå, inte en mall: "Det finns några saker till på sajten som jag hellre tar i ett samtal än i ett mejl."`,
-  ].join("\n");
+  return ut;
+}
+
+/** Den fasta meningen om fler fynd för ett prospekt: varianten väljs ur filen utifrån prospektets id, så att omtag ger samma mening. */
+export function flerFyndMening(tilltal: Tilltal, prospektId: number): string | null {
+  const varianter = lasFlerFyndMeningar()[tilltal];
+  if (!varianter.length) return null;
+  return varianter[Math.abs(prospektId) % varianter.length];
+}
+
+/**
+ * Lägger den fasta meningen om fler fynd som ett eget stycke omedelbart före erbjudandet (stycket som nämner
+ * rkkommunikation.se). Finns inget sådant stycke läggs den före hälsningsfrasen. Görs efter grinden, så meningen
+ * räknas inte i ordgränsen och prövas inte av tonkontrollen.
+ */
+export function medFlerFynd(brodtext: string, mening: string | null): string {
+  if (!mening) return brodtext;
+  const delar = brodtext.replace(/\r\n/g, "\n").trim().split(/\n\s*\n/);
+  let i = delar.findIndex((d) => /rkkommunikation\.se/i.test(d));
+  if (i < 0) i = Math.max(0, delar.length - 1);
+  delar.splice(i, 0, mening);
+  return delar.join("\n\n");
 }
 
 /** Systemprompten för mejlet: prompts/mejl.md med tilläggen för längd och fler fynd. Samma text i API-vägen och i passet. */
@@ -123,9 +153,11 @@ export function utkastUppgifter(
   tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
   flerFynd: number | null = null,
+  huvudfynd: string | null = null,
 ): Record<string, unknown> {
   const k = konfig();
   const inledning = `Första stycket: programmet skriver "${PRESENTATION}". Du skriver en enda mening till i det stycket: "Jag har gått igenom ${tilltal.tilltal === "du" ? "din" : "er"} webbplats och har några förslag som jag tror kan ge ${tilltal.tilltal === "du" ? "dig" : "er"} fler ..." med ett vanligt ord för det verksamheten vill ha. Nämn aldrig verktyg och beskriv inte verksamheten.`;
+  const huvud = huvudfynd ?? fynd[0]?.fynd_id ?? null;
   return {
     organisation: { namn: p.namn, doman: p.doman, organisationstyp: p.organisationstyp, bransch: p.bransch, ort: p.ort },
     tilltal: tilltal.tilltal,
@@ -134,7 +166,10 @@ export function utkastUppgifter(
     huvudinsikt: huvudinsikt.text,
     avsandare: { namn: k.AVSANDARE_NAMN, sajt: "rkkommunikation.se", bokningslank: k.BOKNINGSLANK || null },
     inledning,
+    huvudpoang: huvud ? `Mejlet öppnar med fyndet ${huvud}, det med roll huvudpoäng. Andra stycket handlar bara om det fyndet.` : null,
     fynd: fynd.map((f) => ({
+      fynd_id: f.fynd_id,
+      roll: f.fynd_id === huvud ? "huvudpoäng" : "stöd",
       omrade: f.omrade,
       djup: f.djup,
       rubrik: f.rubrik,
@@ -167,6 +202,7 @@ export async function skrivUtkast(
   tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
   flerFynd: number | null = null,
+  huvudfynd: string | null = null,
 ): Promise<{ brodtext: string }> {
   const k = konfig();
   return strukturerat({
@@ -175,7 +211,7 @@ export async function skrivUtkast(
     steg: "utkast",
     modell: k.MODEL_ANALYS,
     system: utkastSystem(flerFynd),
-    innehall: [{ type: "text", text: utkastText(utkastUppgifter(p, fynd, huvudinsikt, profil, tilltal, tidigareFel, flerFynd)) }],
+    innehall: [{ type: "text", text: utkastText(utkastUppgifter(p, fynd, huvudinsikt, profil, tilltal, tidigareFel, flerFynd, huvudfynd)) }],
     schema: UtkastSchema,
     maxTokens: 4000,
     effort: "medium",
@@ -201,7 +237,9 @@ export interface UtkastForberett {
   bra: { text: string; url: string | null }[];
   /** Bekräftade fynd som inte används i mejlet, eller null när MEJL_FLER_FYND är av. */
   flerFynd: number | null;
-  grindAlt: { testlage: boolean; huvudinsikt: string; profil: string; tilltal: Tilltal; flerFynd: number | null; kallor: Faktakallor };
+  /** fynd_id för huvudfyndet, det mejlet öppnar med. Står först i valda. */
+  huvudfynd: string;
+  grindAlt: { testlage: boolean; huvudinsikt: string; profil: string; tilltal: Tilltal; flerFynd: number | null; kallor: Faktakallor; huvudfynd: string };
 }
 
 export type UtkastHinder = { typ: "redan_mejl" } | { typ: "inget_mejl"; orsak: string } | { typ: "ingen_adress" };
@@ -219,6 +257,7 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   const val = valjFynd(fynd, huvudinsikt);
   if (val.orsak || !huvudinsikt) return { typ: "inget_mejl", orsak: val.orsak ?? "ingen huvudinsikt" };
   const valda = val.fynd;
+  const huvudfynd = (val.huvud ?? valda[0]).fynd_id;
   const bra = braForProspekt(d, p.id);
 
   // Kontakter
@@ -240,7 +279,7 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   logg.info(`   mottagare: ${mottagare}${alt.testTill ? " (testläge)" : ` (${kontakt?.typ}, från ${kontakt?.kallsida})`}`);
   logg.info(`   tilltal: ${tilltal.tilltal}${tilltal.fornamn ? ` (${tilltal.fornamn})` : ""}, ämne: ${amne}`);
   logg.info(`   huvudinsikt: ${huvudinsikt.text}`);
-  logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} djup ${f.djup}`).join(", ")}`);
+  logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} djup ${f.djup}`).join(", ")}, huvudpoäng ${huvudfynd}`);
 
   // Bekräftade fynd som inte används i mejlet, för meningen före erbjudandet (MEJL_FLER_FYND)
   const flerFynd = k.MEJL_FLER_FYND ? fynd.filter((f) => !valda.includes(f)).length : null;
@@ -248,8 +287,8 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   const underlagFil = underlagSokvag(p.doman);
   const underlag = fs.existsSync(underlagFil) ? lasJson<Underlag>(underlagFil) : null;
   const kallor = byggFaktakallor(p, fynd, profil, underlag);
-  const grindAlt = { testlage: !!alt.testTill || !!alt.igen, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor };
-  return { typ: "klar", valda, huvudinsikt, profil, tilltal, amne, mottagare, bra, flerFynd, grindAlt };
+  const grindAlt = { testlage: !!alt.testTill || !!alt.igen, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor, huvudfynd };
+  return { typ: "klar", valda, huvudinsikt, profil, tilltal, amne, mottagare, bra, flerFynd, huvudfynd, grindAlt };
 }
 
 /**
@@ -277,7 +316,8 @@ export function hanteraUtkastHinder(d: Db, p: Prospekt, h: UtkastHinder): void {
 
 /** Sparar det färdiga utkastet med grindens utfall: mejlrad, status, händelse och fil i data/utkast. */
 export function sparaUtkastResultat(d: Db, p: Prospekt, f: UtkastForberett, brodtext: string, grind: Grindresultat): Utkast {
-  const text = sattIhop(brodtext, f.tilltal.tilltal);
+  const medFler = f.flerFynd && f.flerFynd > 0 ? medFlerFynd(brodtext, flerFyndMening(f.tilltal.tilltal, p.id)) : brodtext;
+  const text = sattIhop(medFler, f.tilltal.tilltal);
   const status = grind.utfall === "stoppad" ? "utkast" : grind.utfall;
   d.prepare("DELETE FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status IN ('utkast', 'i_granskning')").run(p.id);
   d.prepare(
@@ -290,7 +330,7 @@ export function sparaUtkastResultat(d: Db, p: Prospekt, f: UtkastForberett, brod
   fs.writeFileSync(fil, `Till: ${f.mottagare}\nÄmne: ${f.amne}\n\n${text}`, "utf8");
   logg.info(`   ${grind.godkand ? "godkänt av grinden" : `STOPPAT: ${grind.fel.join("; ")}`} -> status ${status}. Fil: ${fil}`);
   if (grind.varningar.length) logg.varning(`   ${grind.varningar.join("; ")}`);
-  return { amne: f.amne, brodtext, text, mottagare: f.mottagare, fynd: f.valda, grind };
+  return { amne: f.amne, brodtext: medFler, text, mottagare: f.mottagare, fynd: f.valda, grind };
 }
 
 /** Hela utkaststeget för ett granskat prospekt: kontakter, val av fynd, utkast, kvalitetsgrind, sparande. */
@@ -302,11 +342,11 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
     return null;
   }
   const forsok = alt.forsok ?? 2;
-  let utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, [], f.flerFynd)).brodtext);
+  let utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, [], f.flerFynd, f.huvudfynd)).brodtext);
   let grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, { ...f.grindAlt, extraFel: utkast.fel });
   for (let i = 1; i < forsok && !grind.godkand; i++) {
     logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
-    utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, grind.fel, f.flerFynd)).brodtext);
+    utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, grind.fel, f.flerFynd, f.huvudfynd)).brodtext);
     grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, { ...f.grindAlt, extraFel: utkast.fel });
   }
   return sparaUtkastResultat(d, p, f, utkast.brodtext, grind);
