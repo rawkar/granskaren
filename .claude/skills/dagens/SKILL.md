@@ -55,11 +55,13 @@ Kontrollera inte underagenternas svar själv och rätta dem inte. Koden gör kon
 Discover görs i sessionen med din egen webbsökning, inte av en underagent.
 
 1. Välj ett oanvänt segment: `MODELLVAG=session npx tsx src/cli.ts segment --lista`. Finns inget oanvänt, be Rawaz köra `segment` via API vid ett annat tillfälle (segmentframtagning ingår inte i passet).
-2. `MODELLVAG=session npx tsx src/cli.ts pass discover-paket --segment <id> --antal 10`. Läs discover-system.md och discover-uppgift.md i mappen som skrivs ut. Följ dem exakt: högst så många sökningar som anges, bara organisationernas egna sajter, inga kända domäner.
-3. Sök med WebSearch. Skriv träffarna som en JSON-lista `[{"namn": ..., "url": ..., "varfor": ...}]` till `traffar.json` i mappen.
-4. `pass discover-in --segment <id>`. Koden sparar träffarna i soktraffar, hämtar varje kandidat och kör förfiltrets kodregler. Kandidater som klarar koden får filer i undermappen `forfilter/`.
-5. Starta `granskaren-forfilter` (Haiku 4.5) på mappen `forfilter/`. Kör sedan `pass forfilter-in --segment <id>`. Godkända blir prospekt med status ny.
-6. Kör `pass forbered` igen för de nya prospekten och fortsätt med avsnitt 2.
+2. `MODELLVAG=session npx tsx src/cli.ts pass discover-paket --segment <id> --antal 10 --sokningar 8`. Läs discover-system.md och discover-uppgift.md i mappen som skrivs ut. Följ dem: bara organisationernas egna sajter, inga kända domäner.
+3. Sök med WebSearch på svenska, alltid med orten i frågan, och gör flera smala sökningar hellre än en bred: yrkesordet med orten, med grannkommuner, med ord som "hemsida", "kontakt", "boka", "medlem", "portfolio", samt yrkesvarianter. Högst så många sökningar som paketet anger. En domän får bara tas med om den står i ett sökresultat eller på en sida du har hämtat. Gissa aldrig en adress utifrån ett namn.
+4. Katalogvägen: sök också efter medlemslistor, register och förteckningar för segmentet (yrkesförbund, kör- och föreningsregister, kommunens föreningsregister, branschorganisationer). För varje sådan sida, kör `pass discover-katalog --segment <id> --url <adress> --varfor "medlem i ..."`. Koden hämtar sidan och lägger de webbplatser den länkar till i traffar.json med hittad_via satt till katalogen.
+5. Skriv sökträffarna som en JSON-lista `[{"namn": ..., "url": ..., "varfor": ..., "hittad_via": ...}]` till `traffar.json` i mappen (lägg till i listan om katalogvägen redan har skrivit dit). `hittad_via` är sökresultatets adress när resultatet pekar på sajten själv, annars den sida där du såg länken.
+6. `pass discover-in --segment <id>`. Koden avvisar domäner som inte kommer från ett sökresultat eller en hämtad sida, sparar resten i soktraffar, hämtar varje kandidat och kör förfiltrets kodregler. Kandidater som klarar koden får filer i undermappen `forfilter/`.
+7. Starta `granskaren-forfilter` (Haiku 4.5) på mappen `forfilter/`. Kör sedan `pass forfilter-in --segment <id>`. Godkända blir prospekt med status ny.
+8. Kör `pass forbered` igen för de nya prospekten och fortsätt med avsnitt 2.
 
 ## 4. Skicka
 

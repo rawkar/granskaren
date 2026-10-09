@@ -19,6 +19,7 @@ import {
   analysIn,
   apiAnvandningSedan,
   discoverIn,
+  discoverKatalog,
   discoverPaket,
   forbered,
   forfilterIn,
@@ -348,23 +349,39 @@ pass
   .description("Skriver uppgiften till webbsökningen för ett segment. Sessionen söker och sparar träffarna i traffar.json i samma mapp")
   .requiredOption("--segment <id>", "segmentets id")
   .option("--antal <n>", "önskat antal träffar", "10")
+  .option("--sokningar <n>", "högsta antal sökningar i sessionen", "8")
   .option("--datum <d>", "passets datum", passIdag())
-  .action((o: { segment: string; antal: string; datum: string }) => {
+  .action((o: { segment: string; antal: string; sokningar: string; datum: string }) => {
     const { d } = passStart();
-    const r = discoverPaket(d, o.datum, Number.parseInt(o.segment, 10), Math.max(1, Number.parseInt(o.antal, 10) || 10));
-    console.log(`Uppgift i ${r.mapp}: discover-system.md och discover-uppgift.md. Högst ${r.maxSok} sökningar, ${r.antal} träffar. Skriv träffarna som JSON-lista [{namn, url, varfor}] i traffar.json i mappen.`);
+    const r = discoverPaket(d, o.datum, Number.parseInt(o.segment, 10), Math.max(1, Number.parseInt(o.antal, 10) || 10), Math.max(1, Number.parseInt(o.sokningar, 10) || 8));
+    console.log(
+      `Uppgift i ${r.mapp}: discover-system.md och discover-uppgift.md. Högst ${r.maxSok} sökningar, ${r.antal} träffar. Skriv träffarna som JSON-lista [{namn, url, varfor, hittad_via}] i traffar.json i mappen. hittad_via är sökresultatets adress eller sidan där domänen hittades. Gissa aldrig en adress.`,
+    );
+  });
+
+pass
+  .command("discover-katalog")
+  .description("Katalogvägen: hämtar en medlemslista eller ett register och lägger de webbplatser den länkar till i traffar.json")
+  .requiredOption("--segment <id>", "segmentets id")
+  .requiredOption("--url <adress>", "katalogsidans adress")
+  .option("--varfor <text>", "motivering som sätts på träffarna")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action(async (o: { segment: string; url: string; varfor?: string; datum: string }) => {
+    const { d } = passStart();
+    const r = await discoverKatalog(d, o.datum, Number.parseInt(o.segment, 10), o.url, o.varfor);
+    console.log(`${r.lankar} externa länkar, ${r.nya} nya träffar tillagda i ${r.fil}`);
   });
 
 pass
   .command("discover-in")
-  .description("Läser träffarna, sparar dem i soktraffar, hämtar kandidaterna, kör förfiltrets kodregler och skriver förfilterpaket")
+  .description("Läser träffarna, avvisar domäner som inte kommer från ett sökresultat eller en hämtad sida, sparar i soktraffar, hämtar kandidaterna, kör förfiltrets kodregler och skriver förfilterpaket")
   .requiredOption("--segment <id>", "segmentets id")
   .option("--fil <sokvag>", "fil med träffarna (annars traffar.json i segmentets mapp)")
   .option("--datum <d>", "passets datum", passIdag())
   .action(async (o: { segment: string; fil?: string; datum: string }) => {
     const { d } = passStart();
     const r = await discoverIn(d, o.datum, Number.parseInt(o.segment, 10), o.fil);
-    console.log(`Träffar: ${r.traffar}, bortvalda av kod: ${r.bortvaldaAvKod}, till förfilter: ${r.tillForfilter.length}${r.tillForfilter.length ? ` (${r.tillForfilter.join(", ")})` : ""}`);
+    console.log(`Träffar: ${r.traffar}, avvisade: ${r.avvisade.length}, bortvalda av kod: ${r.bortvaldaAvKod}, till förfilter: ${r.tillForfilter.length}${r.tillForfilter.length ? ` (${r.tillForfilter.join(", ")})` : ""}`);
   });
 
 pass

@@ -61,8 +61,8 @@ export class WebbSokning implements SearchProvider {
 }
 
 /** Uppgiften till webbsökningen: segment, antal, kundprofil, förebilder och kända domäner. Samma text i API-vägen och i passet. */
-export function discoverUppgift(d: Db, kp: Kundprofil, segment: SegmentRad, antal: number, kanda: Set<string>): { system: string; text: string; maxSok: number } {
-  const maxSok = Math.min(8, Math.max(3, Math.ceil(antal / 4)));
+export function discoverUppgift(d: Db, kp: Kundprofil, segment: SegmentRad, antal: number, kanda: Set<string>, sokningar?: number): { system: string; text: string; maxSok: number } {
+  const maxSok = sokningar ?? Math.min(8, Math.max(3, Math.ceil(antal / 4)));
   return {
     system: lasPrompt("discover-webb"),
     maxSok,
