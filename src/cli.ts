@@ -32,7 +32,7 @@ import {
   utkastPaket,
   verifieringIn,
 } from "./pass/pass.js";
-import { kvotEfter, kvotFore, lasKvotLogg, rymsSajter } from "./pass/kvot.js";
+import { kvotEfter, kvotFore, kvotSammanfattning, kvotSnitt, lasKvotLogg } from "./pass/kvot.js";
 import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
@@ -425,31 +425,36 @@ pass
 
 pass
   .command("kvot")
-  .description("Kvotmätning: --fore <andel> sparar hur mycket av sessionsgränsen som är kvar när passet börjar, --efter <andel> loggar förbrukningen per sajt i data/jamforelse/kvot-logg.csv och visar snittet")
-  .option("--fore <andel>", "andel kvar av sessionsgränsen före passet, i procent")
-  .option("--efter <andel>", "andel kvar av sessionsgränsen efter passet, i procent")
+  .description("Kvotmätning: --fore <session> --vecka <vecka> sparar andel kvar av femtimmarssessionen och veckan när passet börjar, --efter <session> --vecka <vecka> loggar förbrukningen per sajt för båda i data/jamforelse/kvot-logg.csv och visar snitten")
+  .option("--fore <andel>", "andel kvar av sessionen före passet, i procent")
+  .option("--efter <andel>", "andel kvar av sessionen efter passet, i procent")
+  .option("--vecka <andel>", "andel kvar av veckan vid samma avläsning, i procent")
   .option("--kommentar <text>", "anteckning på raden, till exempel plan eller antal agenter", "")
   .option("--datum <d>", "passets datum", passIdag())
-  .action((o: { fore?: string; efter?: string; kommentar: string; datum: string }) => {
+  .action((o: { fore?: string; efter?: string; vecka?: string; kommentar: string; datum: string }) => {
     konfig();
-    if (o.fore !== undefined) {
-      const fil = kvotFore(o.datum, Number(o.fore));
-      const alla = lasKvotLogg().filter((r) => r.sajter > 0);
-      const snitt = alla.length ? alla.reduce((s, r) => s + r.per_sajt, 0) / alla.length : 0;
-      console.log(`Sparat: ${o.fore} procent kvar före passet (${fil}).`);
-      if (snitt > 0) console.log(`Snitt hittills: ${snitt.toFixed(1)} procentenheter per sajt över ${alla.length} pass. Med marginal ryms ${rymsSajter(Number(o.fore), snitt)} sajter.`);
-      else console.log("Ingen tidigare mätning: välj antal sajter enligt tabellen i /dagens.");
-      return;
-    }
-    if (o.efter !== undefined) {
-      const r = kvotEfter(o.datum, Number(o.efter), o.kommentar);
-      console.log(`Passet ${r.rad.datum}: ${r.rad.sajter} sajter (${r.rad.klara} klara), ${r.rad.andel_fore} -> ${r.rad.andel_efter} procent kvar, förbrukning ${r.rad.forbrukning} procentenheter, ${r.rad.per_sajt} per sajt. Loggat i ${r.fil}.`);
-      console.log(`Snitt över ${r.antalPass} pass: ${r.snitt} procentenheter per sajt. Vid 100 procent kvar ryms med marginal ${rymsSajter(100, r.snitt)} sajter.`);
+    if (o.fore !== undefined || o.efter !== undefined) {
+      if (o.vecka === undefined) throw new Error("Ange också --vecka <andel kvar av veckan>, båda värdena står i /usage.");
+      const avlasning = { session: Number(o.fore ?? o.efter), vecka: Number(o.vecka) };
+      if (o.fore !== undefined) {
+        const fil = kvotFore(o.datum, avlasning);
+        console.log(`Sparat före passet: ${avlasning.session} procent kvar av sessionen, ${avlasning.vecka} av veckan (${fil}).`);
+        console.log(kvotSammanfattning(kvotSnitt(), avlasning));
+        return;
+      }
+      const r = kvotEfter(o.datum, avlasning, o.kommentar);
+      console.log(
+        `Passet ${r.rad.datum}: ${r.rad.sajter} sajter (${r.rad.klara} klara). Sessionen ${r.rad.fore.session} -> ${r.rad.efter.session} procent kvar, förbrukning ${r.rad.forbrukning.session} procentenheter, ${r.rad.per_sajt.session} per sajt. Veckan ${r.rad.fore.vecka} -> ${r.rad.efter.vecka} procent kvar, förbrukning ${r.rad.forbrukning.vecka} procentenheter, ${r.rad.per_sajt.vecka} per sajt. Loggat i ${r.fil}.`,
+      );
+      console.log(kvotSammanfattning(r.snitt, avlasning));
       return;
     }
     const alla = lasKvotLogg();
     if (!alla.length) console.log("Ingen kvotlogg ännu.");
-    for (const r of alla) console.log(`${r.datum}: ${r.sajter} sajter, ${r.andel_fore} -> ${r.andel_efter}, ${r.per_sajt} per sajt${r.kommentar ? ` (${r.kommentar})` : ""}`);
+    for (const r of alla) {
+      console.log(`${r.datum}: ${r.sajter} sajter, session ${r.fore.session} -> ${r.efter.session} (${r.per_sajt.session} per sajt), vecka ${r.fore.vecka} -> ${r.efter.vecka} (${r.per_sajt.vecka} per sajt)${r.kommentar ? ` (${r.kommentar})` : ""}`);
+    }
+    if (alla.length) console.log(kvotSammanfattning(kvotSnitt(alla), { session: 100, vecka: 100 }));
   });
 
 program

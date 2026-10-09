@@ -17,13 +17,13 @@ Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägra
 
 ## 0. Innan du börjar
 
-1. Sessionsgränsen och kvotmätningen. Argumenten till /dagens är `/dagens <andel kvar> [antal sajter]`, till exempel `/dagens 100 2`. Saknas andelen, be Rawaz läsa av `/usage` och säga hur stor andel av sessionsgränsen som är kvar. Spara den direkt:
+1. Sessionsgränsen och kvotmätningen. Argumenten till /dagens är `/dagens <session kvar> <vecka kvar> [antal sajter]`, till exempel `/dagens 100 80 2`. Saknas värdena, be Rawaz läsa av `/usage` och säga hur stor andel som är kvar av femtimmarssessionen och av veckan. Spara båda direkt:
 
    ```
-   MODELLVAG=session npx tsx src/cli.ts pass kvot --fore <andel>
+   MODELLVAG=session npx tsx src/cli.ts pass kvot --fore <session> --vecka <vecka>
    ```
 
-   Kommandot visar snittförbrukningen per sajt från tidigare pass (data/jamforelse/kvot-logg.csv) och hur många sajter som ryms med marginal. Finns ett snitt, använd det talet som `--antal` (eller det antal Rawaz angav om det är lägre). Finns inget snitt ännu, välj efter tabellen, hellre färre sajter än ett pass som avbryts mitt i:
+   Kommandot visar snittförbrukningen per sajt från tidigare pass för båda gränserna (data/jamforelse/kvot-logg.csv), hur många sajter som ryms i sessionen med marginal och hur många pass veckan räcker till. Finns ett snitt, använd det talet som `--antal` (eller det antal Rawaz angav om det är lägre). Finns inget snitt ännu, välj efter tabellen, hellre färre sajter än ett pass som avbryts mitt i:
 
    | Kvar av sessionsgränsen | Antal sajter (`--antal`) |
    |---|---|
@@ -91,11 +91,11 @@ Samma utskick som i dag: köade mejl inom sändfönstret och dagens tak, med slu
 
 1. `pass status` och sammanfatta: per sajt antal fynd, bekräftade, utfall i grinden och antal försök.
 2. `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll --sedan <numret från steg 0>`. Det ska stå 0 API-anrop. Visa raden för Rawaz.
-3. Be Rawaz läsa av `/usage` igen och kör `MODELLVAG=session npx tsx src/cli.ts pass kvot --efter <andel> --kommentar "<plan, antal agenter samtidigt>"`. Kommandot loggar förbrukningen per sajt i data/jamforelse/kvot-logg.csv och visar snittet över alla pass samt hur många sajter som ryms vid full kvot. Visa raden för Rawaz. Snittet styr antalet sajter i nästa pass (steg 0).
+3. Be Rawaz läsa av `/usage` igen, båda värdena, och kör `MODELLVAG=session npx tsx src/cli.ts pass kvot --efter <session> --vecka <vecka> --kommentar "<plan, antal agenter samtidigt>"`. Kommandot loggar förbrukningen per sajt för sessionen och veckan i data/jamforelse/kvot-logg.csv och visar snitten över alla pass, hur många sajter som ryms i en session och hur många pass veckan räcker till. Visa raden för Rawaz. Snittet styr antalet sajter i nästa pass (steg 0).
 
 ## Mätpass på två sajter
 
-Första passet på en ny plan eller efter en större ändring körs som mätpass: `/dagens <andel kvar> 2` i en ny session utan annat arbete. Allt annat är som vanligt (SANDLAGE=granska, alla mejl till granskningskön, RUN_PAUSAD=true, högst två agenter samtidigt). Efter passet ger `pass kvot --efter` förbrukningen per sajt, och det talet används för att sätta antalet sajter i kommande pass. Mätpasset den 12 oktober 2026 körs av Rawaz själv i en ny session.
+Första passet på en ny plan eller efter en större ändring körs som mätpass: `/dagens <session kvar> <vecka kvar> 2` i en ny session utan annat arbete. Allt annat är som vanligt (SANDLAGE=granska, alla mejl till granskningskön, RUN_PAUSAD=true, högst två agenter samtidigt). Efter passet ger `pass kvot --efter` förbrukningen per sajt, och det talet används för att sätta antalet sajter i kommande pass. Mätpasset den 12 oktober 2026 körs av Rawaz själv i en ny session.
 
 ## Om sessionsgränsen slår till
 
