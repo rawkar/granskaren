@@ -59,8 +59,7 @@ export function kodskal(d: Db, doman: string, sajt: EnkelSajt): string | null {
 export async function forfiltrera(d: Db, kp: Kundprofil, t: Traff, sajt: EnkelSajt): Promise<ForfilterResultat> {
   const k = konfig();
   const stopp = kodskal(d, t.doman, sajt);
-  const bas = { kundtyp: t.kundtyp, likhet: null, namn: t.namn, yrke: null, ort: null, adress: sajt.adresser[0] ?? null };
-  if (stopp) return { utfall: "bortvald", orsak: stopp, ...bas };
+  if (stopp) return bortvaldAvKod(t, sajt, stopp);
 
   const svar = await strukturerat({
     d,
@@ -68,21 +67,29 @@ export async function forfiltrera(d: Db, kp: Kundprofil, t: Traff, sajt: EnkelSa
     steg: "forfilter",
     modell: k.MODEL_SNABB,
     system: lasPrompt("forfilter"),
-    innehall: [
-      {
-        type: "text",
-        text: [
-          `Kundprofil:\n${kp.text}`,
-          `Likhetsprofiler för förebilder${t.kundtyp ? ` av kundtyp ${t.kundtyp}` : ""}:\n${forebildsText(d, t.kundtyp ?? undefined)}`,
-          `Kandidaten hittades genom: ${t.kalla}${t.varfor ? ` (${t.varfor})` : ""}${t.kundtyp ? `, sökt kundtyp ${t.kundtyp}` : ""}`,
-          `Kandidat: ${t.doman}${t.namn ? ` (${t.namn})` : ""}\nMejladresser som hittats: ${sajt.adresser.join(", ")}\nPlattform: ${sajt.plattformTecken ?? "okänd"}\n\nText från sidorna:\n${sajt.text}`,
-        ].join("\n\n"),
-      },
-    ],
+    innehall: [{ type: "text", text: forfilterUppgift(d, kp, t, sajt) }],
     schema: ForfilterSchema,
     maxTokens: 1500,
   });
+  return forfilterBedom(kp, t, sajt, svar);
+}
 
+export function bortvaldAvKod(t: Traff, sajt: EnkelSajt, orsak: string): ForfilterResultat {
+  return { utfall: "bortvald", orsak, kundtyp: t.kundtyp, likhet: null, namn: t.namn, yrke: null, ort: null, adress: sajt.adresser[0] ?? null };
+}
+
+/** Det modellen får se för en kandidat. Samma text i API-vägen och i passet. */
+export function forfilterUppgift(d: Db, kp: Kundprofil, t: Traff, sajt: EnkelSajt): string {
+  return [
+    `Kundprofil:\n${kp.text}`,
+    `Likhetsprofiler för förebilder${t.kundtyp ? ` av kundtyp ${t.kundtyp}` : ""}:\n${forebildsText(d, t.kundtyp ?? undefined)}`,
+    `Kandidaten hittades genom: ${t.kalla}${t.varfor ? ` (${t.varfor})` : ""}${t.kundtyp ? `, sökt kundtyp ${t.kundtyp}` : ""}`,
+    `Kandidat: ${t.doman}${t.namn ? ` (${t.namn})` : ""}\nMejladresser som hittats: ${sajt.adresser.join(", ")}\nPlattform: ${sajt.plattformTecken ?? "okänd"}\n\nText från sidorna:\n${sajt.text}`,
+  ].join("\n\n");
+}
+
+/** Kodreglerna på modellens svar: kundtyp, offentlig, konkurrent, egen kommunikationsfunktion, personal och likhet. */
+export function forfilterBedom(kp: Kundprofil, t: Traff, sajt: EnkelSajt, svar: Forfilter): ForfilterResultat {
   const kundtyp = svar.kundtyp ?? t.kundtyp;
   const res = { kundtyp, likhet: svar.likhet, namn: svar.namn ?? t.namn, yrke: svar.yrke, ort: svar.ort, adress: sajt.adresser[0] ?? null };
   const skal: string[] = [];

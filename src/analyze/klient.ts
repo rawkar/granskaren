@@ -38,6 +38,9 @@ let klient: Anthropic | undefined;
 export function anthropic(): Anthropic {
   if (!klient) {
     const k = konfig();
+    if (k.MODELLVAG === "session") {
+      throw new Error("API-vägen är avstängd (MODELLVAG=session). Modellstegen görs av underagenter i passet, se granskaren pass.");
+    }
     if (!k.ANTHROPIC_API_KEY) {
       throw new Error("ANTHROPIC_API_KEY saknas i .env. Analysen kan inte köras utan nyckel.");
     }

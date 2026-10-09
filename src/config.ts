@@ -1,12 +1,31 @@
-import "dotenv/config";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { z } from "zod";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROT = path.resolve(here, "..");
-export const DATA_DIR = path.join(ROT, "data");
+/** Datamappen. GRANSKAREN_DATA i miljön pekar om den, till exempel för ett test mot en kopia. */
+export const DATA_DIR = process.env.GRANSKAREN_DATA ? path.resolve(process.env.GRANSKAREN_DATA) : path.join(ROT, "data");
 export const PROMPT_DIR = path.join(ROT, "prompts");
+
+/**
+ * Läser .env utan att skriva över variabler som redan finns i miljön. Med MODELLVAG=session (i miljön eller i
+ * .env) läses ANTHROPIC_API_KEY aldrig in: modellstegen görs då av underagenter i en session, inte via API.
+ */
+function lasEnv(): void {
+  const fil = path.join(ROT, ".env");
+  if (!fs.existsSync(fil)) return;
+  const parsed = dotenv.parse(fs.readFileSync(fil, "utf8"));
+  const modellvag = process.env.MODELLVAG ?? parsed.MODELLVAG ?? "api";
+  for (const [kk, v] of Object.entries(parsed)) {
+    if (kk === "ANTHROPIC_API_KEY" && modellvag.trim() === "session") continue;
+    if (process.env[kk] === undefined) process.env[kk] = v;
+  }
+  if (modellvag.trim() === "session") delete process.env.ANTHROPIC_API_KEY;
+}
+lasEnv();
 
 const bool = z
   .string()
@@ -38,6 +57,8 @@ const belopp = (standard: number) =>
 
 const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(""),
+  /** api: modellstegen går via Anthropic-API:et. session: de görs av underagenter i en Claude-session (granskaren pass), nyckeln läses inte in. */
+  MODELLVAG: z.enum(["api", "session"]).optional().default("api"),
   /** Analys, utkast, segment och likhetsprofil. */
   MODEL_ANALYS: z.string().min(1, "MODEL_ANALYS saknas i .env"),
   /** Verifiering, förfilter och grind. */

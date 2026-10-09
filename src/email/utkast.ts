@@ -22,7 +22,7 @@ import { byggAmne, kvalitetsgrind, MAX_ORD, MIN_ORD, type Grindresultat, type Ti
 import { bastaKontakt, sparaKontakter, utvinnKontakter } from "./kontakter.js";
 import { valjFynd } from "./val.js";
 
-const UtkastSchema = z.object({
+export const UtkastSchema = z.object({
   brodtext: z.string(),
 });
 
@@ -104,9 +104,14 @@ export function flerFyndText(flerFynd: number | null): string {
   ].join("\n");
 }
 
-/** Skriver brödtexten med modellen kring huvudinsikten och de valda fynden. */
-export async function skrivUtkast(
-  d: Db,
+/** Systemprompten för mejlet: prompts/mejl.md med tilläggen för längd och fler fynd. Samma text i API-vägen och i passet. */
+export function utkastSystem(flerFynd: number | null): string {
+  const k = konfig();
+  return lasPrompt("mejl") + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD) + flerFyndText(flerFynd);
+}
+
+/** Uppgifterna modellen får, som JSON-objekt. */
+export function utkastUppgifter(
   p: Prospekt,
   fynd: FyndRad[],
   huvudinsikt: Huvudinsikt,
@@ -114,13 +119,13 @@ export async function skrivUtkast(
   tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
   flerFynd: number | null = null,
-): Promise<{ brodtext: string }> {
+): Record<string, unknown> {
   const k = konfig();
   const inledning =
     k.SANDLAGE === "auto"
       ? "Rawaz har INTE sett sajten själv. Inledningen ska säga att han har gått igenom webbplatsen med sina granskningsverktyg."
       : "Rawaz läser utkastet innan det skickas. Inledningen får säga att han har tittat på webbplatsen.";
-  const uppgifter = {
+  return {
     organisation: { namn: p.namn, doman: p.doman, organisationstyp: p.organisationstyp, bransch: p.bransch, ort: p.ort },
     tilltal: tilltal.tilltal,
     fornamn: tilltal.fornamn,
@@ -144,13 +149,32 @@ export async function skrivUtkast(
     ...(flerFynd !== null ? { fler_bekraftade_fynd_utanfor_mejlet: flerFynd } : {}),
     ...(tidigareFel.length ? { foregaende_utkast_stoppades_pa_grund_av: tidigareFel } : {}),
   };
+}
+
+/** Texten modellen får tillsammans med systemprompten. */
+export function utkastText(uppgifter: Record<string, unknown>): string {
+  return `Uppgifter för mejlet i JSON:\n\n${JSON.stringify(uppgifter, null, 1)}`;
+}
+
+/** Skriver brödtexten med modellen kring huvudinsikten och de valda fynden. */
+export async function skrivUtkast(
+  d: Db,
+  p: Prospekt,
+  fynd: FyndRad[],
+  huvudinsikt: Huvudinsikt,
+  profil: Profil | null,
+  tilltal: { tilltal: Tilltal; fornamn: string | null },
+  tidigareFel: string[] = [],
+  flerFynd: number | null = null,
+): Promise<{ brodtext: string }> {
+  const k = konfig();
   return strukturerat({
     d,
     prospektId: p.id,
     steg: "utkast",
     modell: k.MODEL_ANALYS,
-    system: lasPrompt("mejl") + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD) + flerFyndText(flerFynd),
-    innehall: [{ type: "text", text: `Uppgifter för mejlet i JSON:\n\n${JSON.stringify(uppgifter, null, 1)}` }],
+    system: utkastSystem(flerFynd),
+    innehall: [{ type: "text", text: utkastText(utkastUppgifter(p, fynd, huvudinsikt, profil, tilltal, tidigareFel, flerFynd)) }],
     schema: UtkastSchema,
     maxTokens: 4000,
     effort: "medium",
@@ -162,24 +186,35 @@ export interface DraftAlternativ {
   forsok?: number;
 }
 
-/** Hela utkaststeget för ett granskat prospekt: kontakter, val av fynd, utkast, kvalitetsgrind, sparande. */
-export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): Promise<Utkast | null> {
-  logg.info(`Utkast för ${p.doman} (#${p.id})`);
+/** Allt som behövs för att skriva och granska ett utkast, framtaget utan modell. */
+export interface UtkastForberett {
+  typ: "klar";
+  valda: FyndRad[];
+  huvudinsikt: Huvudinsikt;
+  profil: Profil | null;
+  tilltal: { tilltal: Tilltal; fornamn: string | null };
+  amne: string;
+  mottagare: string;
+  bra: { text: string; url: string | null }[];
+  /** Bekräftade fynd som inte används i mejlet, eller null när MEJL_FLER_FYND är av. */
+  flerFynd: number | null;
+  grindAlt: { testlage: boolean; huvudinsikt: string; profil: string; tilltal: Tilltal; flerFynd: number | null };
+}
+
+export type UtkastHinder = { typ: "redan_mejl" } | { typ: "inget_mejl"; orsak: string } | { typ: "ingen_adress" };
+
+/**
+ * Förberedelsen av utkastet: kontakter ur sparad HTML, val av fynd, tilltal, ämne och uppgifter.
+ * Returnerar ett hinder när inget mejl ska skrivas. Ändrar inget i databasen utom kontakterna.
+ */
+export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): UtkastForberett | UtkastHinder {
   const k = konfig();
-  if (harFattMejl(d, p.id)) {
-    logg.info("   har redan ett skickat eller köat förstamejl, inget nytt utkast");
-    return null;
-  }
+  if (harFattMejl(d, p.id)) return { typ: "redan_mejl" };
   const fynd = fyndForProspekt(d, p.id, true);
   const huvudinsikt = p.huvudinsikt ? (JSON.parse(p.huvudinsikt) as Huvudinsikt) : null;
   const profil = p.profil ? (JSON.parse(p.profil) as Profil) : null;
   const val = valjFynd(fynd, huvudinsikt);
-  if (val.orsak) {
-    logg.info(`   inget mejl: ${val.orsak}. Läggs i granskningskön med rapporten.`);
-    loggaHandelse(d, p.id, "utkast_hoppat", val.orsak);
-    sattStatus(d, p.id, "i_granskning");
-    return null;
-  }
+  if (val.orsak || !huvudinsikt) return { typ: "inget_mejl", orsak: val.orsak ?? "ingen huvudinsikt" };
   const valda = val.fynd;
   const bra = braForProspekt(d, p.id);
 
@@ -196,46 +231,70 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
   sparaKontakter(d, p.id, kontakter);
   const kontakt = bastaKontakt(d, p.id);
   const mottagare = alt.testTill ?? kontakt?.adress ?? null;
-  if (!mottagare) {
-    logg.info(`   ingen mejladress hittad på sajten, markeras endast_formular`);
-    loggaHandelse(d, p.id, "endast_formular");
-    d.prepare("UPDATE prospekt SET orsak_hoppad = 'endast_formular' WHERE id = ?").run(p.id);
-    return null;
-  }
+  if (!mottagare) return { typ: "ingen_adress" };
   const tilltal = tilltalFor(profil, p.kundtyp);
   const amne = byggAmne(k.AMNESMALL, p.doman, p.namn);
   logg.info(`   mottagare: ${mottagare}${alt.testTill ? " (testläge)" : ` (${kontakt?.typ}, från ${kontakt?.kallsida})`}`);
   logg.info(`   tilltal: ${tilltal.tilltal}${tilltal.fornamn ? ` (${tilltal.fornamn})` : ""}, ämne: ${amne}`);
-  logg.info(`   huvudinsikt: ${huvudinsikt!.text}`);
+  logg.info(`   huvudinsikt: ${huvudinsikt.text}`);
   logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} djup ${f.djup}`).join(", ")}`);
 
   // Bekräftade fynd som inte används i mejlet, för meningen före erbjudandet (MEJL_FLER_FYND)
   const flerFynd = k.MEJL_FLER_FYND ? fynd.filter((f) => !valda.includes(f)).length : null;
-  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt!.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd };
-  const forsok = alt.forsok ?? 2;
-  let utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal, [], flerFynd);
-  let grind = await kvalitetsgrind(d, p, { amne, brodtext: utkast.brodtext }, valda, bra, mottagare, grindAlt);
-  for (let i = 1; i < forsok && !grind.godkand; i++) {
-    logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
-    utkast = await skrivUtkast(d, p, valda, huvudinsikt!, profil, tilltal, grind.fel, flerFynd);
-    grind = await kvalitetsgrind(d, p, { amne, brodtext: utkast.brodtext }, valda, bra, mottagare, grindAlt);
-  }
+  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd };
+  return { typ: "klar", valda, huvudinsikt, profil, tilltal, amne, mottagare, bra, flerFynd, grindAlt };
+}
 
-  const text = sattIhop(utkast.brodtext, tilltal.tilltal);
+/** Loggar och sätter status för ett hinder, så som utkaststeget alltid har gjort. */
+export function hanteraUtkastHinder(d: Db, p: Prospekt, h: UtkastHinder): void {
+  if (h.typ === "redan_mejl") {
+    logg.info("   har redan ett skickat eller köat förstamejl, inget nytt utkast");
+  } else if (h.typ === "inget_mejl") {
+    logg.info(`   inget mejl: ${h.orsak}. Läggs i granskningskön med rapporten.`);
+    loggaHandelse(d, p.id, "utkast_hoppat", h.orsak);
+    sattStatus(d, p.id, "i_granskning");
+  } else {
+    logg.info(`   ingen mejladress hittad på sajten, markeras endast_formular`);
+    loggaHandelse(d, p.id, "endast_formular");
+    d.prepare("UPDATE prospekt SET orsak_hoppad = 'endast_formular' WHERE id = ?").run(p.id);
+  }
+}
+
+/** Sparar det färdiga utkastet med grindens utfall: mejlrad, status, händelse och fil i data/utkast. */
+export function sparaUtkastResultat(d: Db, p: Prospekt, f: UtkastForberett, brodtext: string, grind: Grindresultat): Utkast {
+  const text = sattIhop(brodtext, f.tilltal.tilltal);
   const status = grind.utfall === "stoppad" ? "utkast" : grind.utfall;
   d.prepare("DELETE FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status IN ('utkast', 'i_granskning')").run(p.id);
   d.prepare(
     "INSERT INTO mejl (prospekt_id, typ, mottagare, amne, text, anvanda_fynd, sakerhet, status) VALUES (?, 'forsta', ?, ?, ?, ?, ?, ?)",
-  ).run(p.id, mottagare, amne, text, JSON.stringify(valda.map((f) => f.fynd_id)), grind.sakerhet, status);
+  ).run(p.id, f.mottagare, f.amne, text, JSON.stringify(f.valda.map((x) => x.fynd_id)), grind.sakerhet, status);
   sattStatus(d, p.id, status === "utkast" ? "utkast" : status);
-  loggaHandelse(d, p.id, "utkast_skapat", { status, fel: grind.fel, varningar: grind.varningar, sakerhet: grind.sakerhet, tilltal: tilltal.tilltal });
+  loggaHandelse(d, p.id, "utkast_skapat", { status, fel: grind.fel, varningar: grind.varningar, sakerhet: grind.sakerhet, tilltal: f.tilltal.tilltal });
 
   const fil = path.join(dataMapp("utkast"), `${filnamnSaker(p.doman)}.txt`);
-  fs.writeFileSync(fil, `Till: ${mottagare}\nÄmne: ${amne}\n\n${text}`, "utf8");
+  fs.writeFileSync(fil, `Till: ${f.mottagare}\nÄmne: ${f.amne}\n\n${text}`, "utf8");
   logg.info(`   ${grind.godkand ? "godkänt av grinden" : `STOPPAT: ${grind.fel.join("; ")}`} -> status ${status}. Fil: ${fil}`);
   if (grind.varningar.length) logg.varning(`   ${grind.varningar.join("; ")}`);
+  return { amne: f.amne, brodtext, text, mottagare: f.mottagare, fynd: f.valda, grind };
+}
 
-  return { amne, brodtext: utkast.brodtext, text, mottagare, fynd: valda, grind };
+/** Hela utkaststeget för ett granskat prospekt: kontakter, val av fynd, utkast, kvalitetsgrind, sparande. */
+export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): Promise<Utkast | null> {
+  logg.info(`Utkast för ${p.doman} (#${p.id})`);
+  const f = forberedUtkast(d, p, alt);
+  if (f.typ !== "klar") {
+    hanteraUtkastHinder(d, p, f);
+    return null;
+  }
+  const forsok = alt.forsok ?? 2;
+  let utkast = await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, [], f.flerFynd);
+  let grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, f.grindAlt);
+  for (let i = 1; i < forsok && !grind.godkand; i++) {
+    logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
+    utkast = await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, grind.fel, f.flerFynd);
+    grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, f.grindAlt);
+  }
+  return sparaUtkastResultat(d, p, f, utkast.brodtext, grind);
 }
 
 export function rapportFor(p: Prospekt): string {

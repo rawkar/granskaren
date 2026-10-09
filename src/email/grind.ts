@@ -120,26 +120,25 @@ export function tillaggsfel(brodtext: string, fynd: FyndRad[], flerFynd: number 
   return fel;
 }
 
-const GrindSchema = z.object({
+export const GrindSchema = z.object({
   pastaenden_utan_stod: z.array(z.string()),
   siffror_utan_stod: z.array(z.string()),
   tonproblem: z.array(z.string()),
 });
+export type Grindsvar = z.infer<typeof GrindSchema>;
 
-/** Kvalitetsgrind enligt avsnitt 9.5 i briefen och avsnitt 8 till 9 i tillägget. */
-export async function kvalitetsgrind(
-  d: Db,
-  p: Prospekt,
-  utkast: { amne: string; brodtext: string },
-  fynd: FyndRad[],
-  bra: { text: string }[],
-  mottagare: string | null,
-  alt: { testlage?: boolean; huvudinsikt?: string | null; profil?: string | null; tilltal?: Tilltal; flerFynd?: number | null } = {},
-): Promise<Grindresultat> {
+export interface GrindAlternativ {
+  testlage?: boolean;
+  huvudinsikt?: string | null;
+  profil?: string | null;
+  tilltal?: Tilltal;
+  flerFynd?: number | null;
+}
+
+/** Grindens kodkontroller: språkregler, tilläggets regler, ämnesrad, antal fynd, verifiering, mottagare och spärrlista. */
+export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext: string }, fynd: FyndRad[], mottagare: string | null, alt: GrindAlternativ = {}): string[] {
   const k = konfig();
   const fel: string[] = [];
-  const varningar: string[] = [];
-
   fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
   fel.push(...tillaggsfel(utkast.brodtext, fynd, alt.flerFynd ?? null));
 
@@ -157,6 +156,50 @@ export async function kvalitetsgrind(
     if (arSparrad(d, p.doman)) fel.push("domänen finns på spärrlistan");
     if (harFattMejl(d, p.id)) fel.push("domänen har redan fått ett mejl");
   }
+  return fel;
+}
+
+/** Det grindens modell får se: mejlet, tilltalet, huvudinsikten, profilen, fynden och det som fungerar bra. */
+export function grindUppgift(utkast: { amne: string; brodtext: string }, fynd: FyndRad[], bra: { text: string }[], alt: GrindAlternativ = {}): string {
+  return `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nTilltal som gäller: ${alt.tilltal ?? "okänt"}\n\nHuvudinsikt:\n${alt.huvudinsikt ?? "(ingen)"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
+    fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, insikt: f.insikt, effekt: f.effekt, forslag_konkret: f.forslag_konkret, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde }, belagg2: f.belagg2_varde })),
+    null,
+    1,
+  )}\n\nDet som fungerar bra:\n${JSON.stringify(bra.map((b) => b.text))}`;
+}
+
+/** Lägger modellens svar till fel och varningar. */
+export function tillampaGrindsvar(svar: Grindsvar, fel: string[], varningar: string[]): void {
+  for (const s of svar.pastaenden_utan_stod) fel.push(`påstående utan stöd i fynd: "${s}"`);
+  for (const s of svar.siffror_utan_stod) varningar.push(`siffra utan stöd: "${s}"`);
+  for (const s of svar.tonproblem) varningar.push(`ton: ${s}`);
+}
+
+/** Utfallet: stoppad vid fel, köad i auto-läge utan varningar och med tillräcklig säkerhet, annars granskningskön. */
+export function grindUtfall(fel: string[], varningar: string[], fynd: FyndRad[]): Grindresultat {
+  const k = konfig();
+  const sakerhet = fynd.length ? Math.min(...fynd.map((f) => f.sakerhet)) : 0;
+  const godkand = fel.length === 0;
+  let utfall: Grindresultat["utfall"];
+  if (!godkand) utfall = "stoppad";
+  else if (k.SANDLAGE === "auto" && sakerhet >= k.MIN_SAKERHET_AUTO && varningar.length === 0) utfall = "koad";
+  else utfall = "i_granskning";
+  return { godkand, fel, varningar, sakerhet, utfall };
+}
+
+/** Kvalitetsgrind enligt avsnitt 9.5 i briefen och avsnitt 8 till 9 i tillägget. */
+export async function kvalitetsgrind(
+  d: Db,
+  p: Prospekt,
+  utkast: { amne: string; brodtext: string },
+  fynd: FyndRad[],
+  bra: { text: string }[],
+  mottagare: string | null,
+  alt: GrindAlternativ = {},
+): Promise<Grindresultat> {
+  const k = konfig();
+  const fel = grindKodfel(d, p, utkast, fynd, mottagare, alt);
+  const varningar: string[] = [];
 
   // Påståenden mot fynd, med den snabba modellen
   try {
@@ -166,31 +209,13 @@ export async function kvalitetsgrind(
       steg: "grind",
       modell: k.MODEL_SNABB,
       system: lasPrompt("grind"),
-      innehall: [
-        {
-          type: "text",
-          text: `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nTilltal som gäller: ${alt.tilltal ?? "okänt"}\n\nHuvudinsikt:\n${alt.huvudinsikt ?? "(ingen)"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
-            fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, insikt: f.insikt, effekt: f.effekt, forslag_konkret: f.forslag_konkret, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde }, belagg2: f.belagg2_varde })),
-            null,
-            1,
-          )}\n\nDet som fungerar bra:\n${JSON.stringify(bra.map((b) => b.text))}`,
-        },
-      ],
+      innehall: [{ type: "text", text: grindUppgift(utkast, fynd, bra, alt) }],
       schema: GrindSchema,
       maxTokens: 2000,
     });
-    for (const s of svar.pastaenden_utan_stod) fel.push(`påstående utan stöd i fynd: "${s}"`);
-    for (const s of svar.siffror_utan_stod) varningar.push(`siffra utan stöd: "${s}"`);
-    for (const s of svar.tonproblem) varningar.push(`ton: ${s}`);
+    tillampaGrindsvar(svar, fel, varningar);
   } catch (e) {
     varningar.push(`kontrollen av påståenden kunde inte köras: ${e instanceof Error ? e.message : String(e)}`);
   }
-
-  const sakerhet = fynd.length ? Math.min(...fynd.map((f) => f.sakerhet)) : 0;
-  const godkand = fel.length === 0;
-  let utfall: Grindresultat["utfall"];
-  if (!godkand) utfall = "stoppad";
-  else if (k.SANDLAGE === "auto" && sakerhet >= k.MIN_SAKERHET_AUTO && varningar.length === 0) utfall = "koad";
-  else utfall = "i_granskning";
-  return { godkand, fel, varningar, sakerhet, utfall };
+  return grindUtfall(fel, varningar, fynd);
 }

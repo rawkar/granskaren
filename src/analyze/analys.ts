@@ -74,36 +74,58 @@ export function lasPerspektiv(): string | null {
   return ifyllda.map((a) => `### ${a.rubrik}\n${a.text.join("\n")}`).join("\n\n");
 }
 
-/** Ett analysanrop som ger profil, fynd och huvudinsikt i samma svar. */
-export async function analysera(d: Db, prospektId: number, u: Underlag, alt: AnalysAlternativ = {}): Promise<Analys> {
+/** Systemprompten för analysen: prompts/analys.md, Rawaz perspektiv och eventuellt omfång. Samma text i API-vägen och i passet. */
+export function analysSystem(): string {
   const k = konfig();
-  const maxFynd = k.ANALYS_MAX_FYND;
-  const innehall: Anthropic.ContentBlockParam[] = [];
-
-  // Högst en skärmbild: startsidan i mobil
-  const start = u.sidor.find((s) => s.roll === "start");
-  const bild = bildBlock(start?.skarmbild_mobil ?? null);
-  if (bild) {
-    innehall.push({ type: "text", text: `Skärmbild av startsidan i mobil (${start?.url ?? ""})` });
-    innehall.push(bild);
-  }
-
-  innehall.push({
-    type: "text",
-    text: `Underlag för ${u.doman} i JSON. Nycklarna under kontroll, matt, lighthouse, axe och sajt är de som får användas som belägg av typen matvarde.\n\n${JSON.stringify(underlagForModell(u), null, 1)}`,
-  });
-
   let system = lasPrompt("analys");
   const perspektiv = lasPerspektiv();
   if (perspektiv) system += `\n\n## Rawaz eget perspektiv\n\nDet här har Rawaz själv skrivit om hur han bedömer webbplatser. Väg in det i analysen och i valet av vad som är viktigast.\n\n${perspektiv}`;
-  system += omfangsText(maxFynd, k.ANALYS_KORT);
+  system += omfangsText(k.ANALYS_MAX_FYND, k.ANALYS_KORT);
+  return system;
+}
+
+/** Texten som skickas med underlaget, plus skärmbildens rubrik och sökväg om det finns en. */
+export function analysUppgift(u: Underlag): { skarmbildText: string | null; skarmbild: string | null; text: string } {
+  const start = u.sidor.find((s) => s.roll === "start");
+  const skarmbild = start?.skarmbild_mobil && fs.existsSync(start.skarmbild_mobil) ? start.skarmbild_mobil : null;
+  return {
+    skarmbildText: skarmbild ? `Skärmbild av startsidan i mobil (${start?.url ?? ""})` : null,
+    skarmbild,
+    text: `Underlag för ${u.doman} i JSON. Nycklarna under kontroll, matt, lighthouse, axe och sajt är de som får användas som belägg av typen matvarde.\n\n${JSON.stringify(underlagForModell(u), null, 1)}`,
+  };
+}
+
+/** Schemat svaret valideras mot, beroende på ANALYS_KORT. */
+export function analysSchema(): typeof AnalysSchema | typeof AnalysKortSchema {
+  return konfig().ANALYS_KORT ? AnalysKortSchema : AnalysSchema;
+}
+
+/** Tolkar ett svar enligt analysSchema() till en fullständig Analys. Kastar vid ogiltigt svar. */
+export function tolkaAnalys(svar: unknown): Analys {
+  if (konfig().ANALYS_KORT) return franKortAnalys(AnalysKortSchema.parse(svar));
+  return AnalysSchema.parse(svar);
+}
+
+/** Ett analysanrop som ger profil, fynd och huvudinsikt i samma svar. */
+export async function analysera(d: Db, prospektId: number, u: Underlag, alt: AnalysAlternativ = {}): Promise<Analys> {
+  const k = konfig();
+  const innehall: Anthropic.ContentBlockParam[] = [];
+
+  // Högst en skärmbild: startsidan i mobil
+  const uppgift = analysUppgift(u);
+  const bild = bildBlock(uppgift.skarmbild);
+  if (bild && uppgift.skarmbildText) {
+    innehall.push({ type: "text", text: uppgift.skarmbildText });
+    innehall.push(bild);
+  }
+  innehall.push({ type: "text", text: uppgift.text });
 
   const bas = {
     d,
     prospektId,
     steg: alt.steg ?? "analys",
     modell: alt.modell ?? k.MODEL_ANALYS,
-    system,
+    system: analysSystem(),
     innehall,
     maxTokens: 20000,
     effort: "high" as const,
@@ -111,8 +133,12 @@ export async function analysera(d: Db, prospektId: number, u: Underlag, alt: Ana
   const svar: Analys = k.ANALYS_KORT
     ? franKortAnalys(await strukturerat({ ...bas, schema: AnalysKortSchema }))
     : await strukturerat({ ...bas, schema: AnalysSchema });
+  return stadaAnalys(svar);
+}
 
-  // Efterstädning: intervall, tjänsteområde enligt område, unika id:n
+/** Efterstädning av ett analyssvar: intervall, tjänsteområde enligt område, unika id:n, högst så många fynd som begärts. */
+export function stadaAnalys(svar: Analys): Analys {
+  const maxFynd = konfig().ANALYS_MAX_FYND;
   const sedda = new Set<string>();
   svar.fynd = svar.fynd.slice(0, maxFynd < STANDARD_MAX_FYND ? maxFynd : 8).map((f, i) => {
     const s = stadaFynd(f);

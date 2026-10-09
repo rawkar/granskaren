@@ -34,19 +34,9 @@ export class WebbSokning implements SearchProvider {
   async sok(d: Db, kp: Kundprofil, segment: SegmentRad, antal: number, kanda: Set<string>): Promise<Traff[]> {
     const k = konfig();
     const client = anthropic();
-    const maxSok = Math.min(8, Math.max(3, Math.ceil(antal / 4)));
-    const messages: Anthropic.MessageParam[] = [
-      {
-        role: "user",
-        content: [
-          `Segment: kundtyp ${segment.kundtyp}, ${segment.yrke} i ${segment.ort}. Sökfras: "${segment.sokfras}". Motivering: ${segment.motivering ?? ""}`,
-          `Önskat antal träffar: ${antal}. Du får göra högst ${maxSok} sökningar.`,
-          `Kundprofil:\n${kp.text}`,
-          `Likhetsprofiler för förebilder av kundtyp ${segment.kundtyp}:\n${forebildsText(d, segment.kundtyp)}`,
-          `Redan kända domäner som inte ska tas med:\n${[...kanda].slice(0, 300).join(", ") || "(inga)"}`,
-        ].join("\n\n"),
-      },
-    ];
+    const uppgift = discoverUppgift(d, kp, segment, antal, kanda);
+    const maxSok = uppgift.maxSok;
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: uppgift.text }];
     const tools: Anthropic.ToolUnion[] = [
       { type: "web_search_20260209", name: "web_search", max_uses: maxSok, user_location: { type: "approximate", country: "SE", timezone: "Europe/Stockholm" } },
     ];
@@ -66,27 +56,48 @@ export class WebbSokning implements SearchProvider {
       const sokningar = svar.content.filter((b) => b.type === "server_tool_use").length;
       logg.info(`   [debug] stop_reason ${svar.stop_reason}, ${sokningar} sökningar i sista svaret, modellens text:\n${text.slice(0, 3000)}`);
     }
-    const block = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text.match(/\[[\s\S]*\]/)?.[0];
-    if (!block) {
-      logg.varning("   webbsökningen gav ingen JSON-lista");
-      return [];
-    }
-    let lista: z.infer<typeof TraffSchema>;
-    try {
-      lista = TraffSchema.parse(JSON.parse(block));
-    } catch (e) {
-      logg.varning(`   listan från webbsökningen gick inte att tolka: ${e instanceof Error ? e.message : String(e)}`);
-      return [];
-    }
-    const ut: Traff[] = [];
-    for (const t of lista) {
-      const doman = normaliseraDoman(t.url);
-      if (!doman || kanda.has(doman)) continue;
-      kanda.add(doman);
-      ut.push({ doman, namn: t.namn || null, kalla: "discover:webb", segmentId: segment.id, kundtyp: segment.kundtyp, varfor: t.varfor ?? null });
-    }
-    return ut;
+    return tolkaTrafflista(text, segment, kanda, "discover:webb");
   }
+}
+
+/** Uppgiften till webbsökningen: segment, antal, kundprofil, förebilder och kända domäner. Samma text i API-vägen och i passet. */
+export function discoverUppgift(d: Db, kp: Kundprofil, segment: SegmentRad, antal: number, kanda: Set<string>): { system: string; text: string; maxSok: number } {
+  const maxSok = Math.min(8, Math.max(3, Math.ceil(antal / 4)));
+  return {
+    system: lasPrompt("discover-webb"),
+    maxSok,
+    text: [
+      `Segment: kundtyp ${segment.kundtyp}, ${segment.yrke} i ${segment.ort}. Sökfras: "${segment.sokfras}". Motivering: ${segment.motivering ?? ""}`,
+      `Önskat antal träffar: ${antal}. Du får göra högst ${maxSok} sökningar.`,
+      `Kundprofil:\n${kp.text}`,
+      `Likhetsprofiler för förebilder av kundtyp ${segment.kundtyp}:\n${forebildsText(d, segment.kundtyp)}`,
+      `Redan kända domäner som inte ska tas med:\n${[...kanda].slice(0, 300).join(", ") || "(inga)"}`,
+    ].join("\n\n"),
+  };
+}
+
+/** Plockar JSON-listan ur modellens text och gör träffar av den, utan domäner som redan är kända. */
+export function tolkaTrafflista(text: string, segment: SegmentRad, kanda: Set<string>, kalla: string): Traff[] {
+  const block = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text.match(/\[[\s\S]*\]/)?.[0];
+  if (!block) {
+    logg.varning("   webbsökningen gav ingen JSON-lista");
+    return [];
+  }
+  let lista: z.infer<typeof TraffSchema>;
+  try {
+    lista = TraffSchema.parse(JSON.parse(block));
+  } catch (e) {
+    logg.varning(`   listan från webbsökningen gick inte att tolka: ${e instanceof Error ? e.message : String(e)}`);
+    return [];
+  }
+  const ut: Traff[] = [];
+  for (const t of lista) {
+    const doman = normaliseraDoman(t.url);
+    if (!doman || kanda.has(doman)) continue;
+    kanda.add(doman);
+    ut.push({ doman, namn: t.namn || null, kalla, segmentId: segment.id, kundtyp: segment.kundtyp, varfor: t.varfor ?? null });
+  }
+  return ut;
 }
 
 /**

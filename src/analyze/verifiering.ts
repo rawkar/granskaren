@@ -5,7 +5,7 @@ import { konfig } from "../config.js";
 import type { Db } from "../db/index.js";
 import type { LankKontroll } from "../measure/lankar.js";
 import { bildBlock, lasPrompt, strukturerat } from "./klient.js";
-import { VerifieringSchema, type Belagg, type Fynd } from "./schema.js";
+import { VerifieringSchema, type Belagg, type Fynd, type Verifiering } from "./schema.js";
 import { hittaSida, korta, nycklarForSida, rensaText, type SidUnderlag, type Underlag } from "./underlag.js";
 
 export interface VerifieringsResultat {
@@ -30,31 +30,65 @@ export async function verifieraFynd(
   lankar: LankKontroll[],
   anvandModell = true,
 ): Promise<VerifieringsResultat> {
+  const steg = verifieraMedKod(u, f, lankar);
+  if (steg.klar) return steg.klar;
+  if (!anvandModell) return { verifierad: false, metod: "ingen", not: "Modellkontroll avstängd." };
+  const modell = await kontrolleraMedModell(d, prospektId, steg.sida, steg.sida2, f);
+  return kombineraVerifiering(steg, modell);
+}
+
+/** Kodkontrollen är klar och avgjorde fyndet, eller så behöver fyndet modellens bedömning av de här sidorna. */
+export type KodSteg =
+  | { klar: VerifieringsResultat }
+  | { klar?: undefined; kodNot: string; metod: "kod+modell" | "modell"; sida: SidUnderlag; sida2: SidUnderlag | undefined };
+
+/**
+ * Kodkontrollen, som alltid går före modellen: belägg av typerna matvarde, saknat_element, statuskod och citat
+ * kontrolleras mot rådata. Fynd som faller här når aldrig modellen.
+ */
+export function verifieraMedKod(u: Underlag, f: Fynd, lankar: LankKontroll[]): KodSteg {
   const kod = kontrolleraMedKod(u, f.belagg, lankar);
-  if (kod && !kod.ok) return { verifierad: false, metod: "kod", not: kod.not };
+  if (kod && !kod.ok) return { klar: { verifierad: false, metod: "kod", not: kod.not } };
 
   let kod2: { ok: boolean; not: string } | null = null;
   if (f.djup >= 3) {
-    if (!f.belagg2) return { verifierad: false, metod: "kod", not: "Fynd med djup 3 kräver två belägg, bara ett angavs." };
+    if (!f.belagg2) return { klar: { verifierad: false, metod: "kod", not: "Fynd med djup 3 kräver två belägg, bara ett angavs." } };
     kod2 = kontrolleraMedKod(u, f.belagg2, lankar);
-    if (kod2 && !kod2.ok) return { verifierad: false, metod: "kod", not: `Andra belägget: ${kod2.not}` };
+    if (kod2 && !kod2.ok) return { klar: { verifierad: false, metod: "kod", not: `Andra belägget: ${kod2.not}` } };
   }
   const kodNot = [kod?.not, kod2 ? `Andra belägget: ${kod2.not}` : null].filter(Boolean).join(" ");
 
   const behoverModell = f.belagg.typ === "skarmbild" || f.belagg2?.typ === "skarmbild" || BEDOMNINGSOMRADEN.has(f.omrade) || f.djup >= 3;
   if (!behoverModell) {
-    return kod ? { verifierad: true, metod: "kod", not: kodNot } : { verifierad: false, metod: "ingen", not: "Ingen kontroll kunde göras." };
+    return { klar: kod ? { verifierad: true, metod: "kod", not: kodNot } : { verifierad: false, metod: "ingen", not: "Ingen kontroll kunde göras." } };
   }
-  if (!anvandModell) return { verifierad: false, metod: "ingen", not: "Modellkontroll avstängd." };
-
   const sida = hittaSida(u, f.belagg.url);
-  if (!sida) return { verifierad: false, metod: "kod", not: `URL:en ${f.belagg.url} finns inte bland hämtade sidor.` };
+  if (!sida) return { klar: { verifierad: false, metod: "kod", not: `URL:en ${f.belagg.url} finns inte bland hämtade sidor.` } };
   const sida2 = f.belagg2 ? hittaSida(u, f.belagg2.url) : undefined;
+  return { kodNot, metod: kod ? "kod+modell" : "modell", sida, sida2: sida2 && sida2 !== sida ? sida2 : undefined };
+}
 
-  const modell = await kontrolleraMedModell(d, prospektId, sida, sida2 && sida2 !== sida ? sida2 : undefined, f);
-  const metod = kod ? "kod+modell" : "modell";
-  const not = [kodNot, `Modell: ${modell.bedomning}. ${modell.motivering}`].filter(Boolean).join(" ");
-  return { verifierad: modell.bedomning === "bekraftat", metod, not };
+/** Slår ihop kodkontrollens not med modellens bedömning till det slutliga utfallet. */
+export function kombineraVerifiering(steg: Exclude<KodSteg, { klar: VerifieringsResultat }>, modell: Verifiering): VerifieringsResultat {
+  const not = [steg.kodNot, `Modell: ${modell.bedomning}. ${modell.motivering}`].filter(Boolean).join(" ");
+  return { verifierad: modell.bedomning === "bekraftat", metod: steg.metod, not };
+}
+
+/** Det modellen får se för ett fynd: fyndet, sidans kontroller och fullständiga text, och en skärmbild om belägget är en skärmbild. */
+export function verifieringsUppgift(sida: SidUnderlag, sida2: SidUnderlag | undefined, f: Fynd): { skarmbildText: string | null; skarmbild: string | null; text: string } {
+  const sidtext = (s: SidUnderlag) =>
+    [
+      `Sidans URL: ${s.url} (roll: ${s.roll}, titel: ${s.titel ?? "saknas"})`,
+      `Automatiska kontroller och mått:\n${JSON.stringify({ ...s.kontroll, rubriker: s.kontroll.rubriker.slice(0, 20), matt: s.matt }, null, 1)}`,
+      `Sidans fullständiga text:\n${korta(rensaText(s.text), 14000)}`,
+    ].join("\n\n");
+  const medBild = f.belagg.typ === "skarmbild" || f.belagg2?.typ === "skarmbild";
+  const skarmbild = medBild && sida.skarmbild_mobil && fs.existsSync(sida.skarmbild_mobil) ? sida.skarmbild_mobil : null;
+  return {
+    skarmbildText: skarmbild ? `Skärmbild i mobil av ${sida.url}` : null,
+    skarmbild,
+    text: [`Fynd att kontrollera:\n${JSON.stringify(f, null, 1)}`, sidtext(sida), sida2 ? `Andra beläggets sida.\n${sidtext(sida2)}` : ""].filter(Boolean).join("\n\n"),
+  };
 }
 
 /** Returnerar null om belägget inte går att kontrollera med kod. */
@@ -159,26 +193,16 @@ function jamfor(nyckel: string, faktiskt: unknown, pastatt: string): { ok: boole
     : { ok: false, not: `${nyckel} är "${String(faktiskt).slice(0, 80)}", inte "${pastatt}".` };
 }
 
-async function kontrolleraMedModell(d: Db, prospektId: number, sida: SidUnderlag, sida2: SidUnderlag | undefined, f: Fynd) {
+async function kontrolleraMedModell(d: Db, prospektId: number, sida: SidUnderlag, sida2: SidUnderlag | undefined, f: Fynd): Promise<Verifiering> {
   const k = konfig();
   const innehall: Anthropic.ContentBlockParam[] = [];
-  if (f.belagg.typ === "skarmbild" || f.belagg2?.typ === "skarmbild") {
-    const b = bildBlock(sida.skarmbild_mobil);
-    if (b) {
-      innehall.push({ type: "text", text: `Skärmbild i mobil av ${sida.url}` });
-      innehall.push(b);
-    }
+  const uppgift = verifieringsUppgift(sida, sida2, f);
+  const b = bildBlock(uppgift.skarmbild);
+  if (b && uppgift.skarmbildText) {
+    innehall.push({ type: "text", text: uppgift.skarmbildText });
+    innehall.push(b);
   }
-  const sidtext = (s: SidUnderlag) =>
-    [
-      `Sidans URL: ${s.url} (roll: ${s.roll}, titel: ${s.titel ?? "saknas"})`,
-      `Automatiska kontroller och mått:\n${JSON.stringify({ ...s.kontroll, rubriker: s.kontroll.rubriker.slice(0, 20), matt: s.matt }, null, 1)}`,
-      `Sidans fullständiga text:\n${korta(rensaText(s.text), 14000)}`,
-    ].join("\n\n");
-  innehall.push({
-    type: "text",
-    text: [`Fynd att kontrollera:\n${JSON.stringify(f, null, 1)}`, sidtext(sida), sida2 ? `Andra beläggets sida.\n${sidtext(sida2)}` : ""].filter(Boolean).join("\n\n"),
-  });
+  innehall.push({ type: "text", text: uppgift.text });
   return strukturerat({
     d,
     prospektId,
