@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import type Anthropic from "@anthropic-ai/sdk";
 import { konfig } from "../config.js";
 import type { Db } from "../db/index.js";
+import { forslagsfel } from "../email/fakta.js";
 import type { LankKontroll } from "../measure/lankar.js";
 import { bildBlock, lasPrompt, strukturerat } from "./klient.js";
 import { VerifieringSchema, type Belagg, type Fynd, type Verifiering } from "./schema.js";
@@ -35,6 +36,23 @@ export async function verifieraFynd(
   if (!anvandModell) return { verifierad: false, metod: "ingen", not: "Modellkontroll avstängd." };
   const modell = await kontrolleraMedModell(d, prospektId, steg.sida, steg.sida2, f);
   return kombineraVerifiering(steg, modell);
+}
+
+/**
+ * Stryker konkreta förslag med värderande påståenden om mottagaren som inte står ordagrant på sajten.
+ * Returnerar en rad per struket förslag. Körs före verifieringen i båda vägarna.
+ */
+export function rensaForslag(u: Underlag, fynd: Fynd[]): string[] {
+  const sidtexter = u.sidor.map((s) => s.text);
+  const ut: string[] = [];
+  for (const f of fynd) {
+    const orsak = forslagsfel(f.forslag_konkret, sidtexter);
+    if (orsak) {
+      ut.push(`${f.id}: förslaget "${f.forslag_konkret}" ströks, ${orsak}`);
+      f.forslag_konkret = null;
+    }
+  }
+  return ut;
 }
 
 /** Kodkontrollen är klar och avgjorde fyndet, eller så behöver fyndet modellens bedömning av de här sidorna. */

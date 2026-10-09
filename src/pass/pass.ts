@@ -9,14 +9,15 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import * as cheerio from "cheerio";
 import { z } from "zod";
 import { analysSchema, analysSystem, analysUppgift, stadaAnalys, tolkaAnalys } from "../analyze/analys.js";
 import { lasPrompt } from "../analyze/klient.js";
 import { type Analys, type Fynd, VerifieringSchema, type Verifiering } from "../analyze/schema.js";
 import type { Underlag } from "../analyze/underlag.js";
-import { kombineraVerifiering, verifieraMedKod, verifieringsUppgift, type KodSteg, type VerifieringsResultat } from "../analyze/verifiering.js";
+import { kombineraVerifiering, rensaForslag, verifieraMedKod, verifieringsUppgift, type KodSteg, type VerifieringsResultat } from "../analyze/verifiering.js";
 import { avslutaGranskning, hamtaOchMat, sparaAnalys, tillampaVerifiering } from "../audit.js";
-import { DATA_DIR, konfig } from "../config.js";
+import { DATA_DIR, konfig, USER_AGENT } from "../config.js";
 import type { Db } from "../db/index.js";
 import {
   hamtaProspekt,
@@ -34,10 +35,11 @@ import { kandaDomaner } from "../discover/discover.js";
 import { bortvaldAvKod, ForfilterSchema, forfilterBedom, forfilterUppgift, hamtaForForfilter, kodskal } from "../discover/forfilter.js";
 import type { EnkelSajt } from "../discover/hamtaEnkel.js";
 import { lasKundprofil } from "../discover/kundprofil.js";
-import { discoverUppgift, tolkaTrafflista, type Traff } from "../discover/providers.js";
+import { discoverUppgift, type Traff } from "../discover/providers.js";
+import { normaliseraDoman } from "../util/domain.js";
 import { allaSegment } from "../discover/segment.js";
 import { grindKodfel, GrindSchema, grindUppgift, grindUtfall, tillampaGrindsvar } from "../email/grind.js";
-import { forberedUtkast, hanteraUtkastHinder, sparaUtkastResultat, UtkastSchema, utkastSystem, utkastText, utkastUppgifter, type UtkastForberett } from "../email/utkast.js";
+import { forberedUtkast, hanteraUtkastHinder, sammansattBrodtext, sparaUtkastResultat, UtkastSchema, utkastSystem, utkastText, utkastUppgifter, type UtkastForberett } from "../email/utkast.js";
 import type { LankKontroll } from "../measure/lankar.js";
 import { underlagSokvag } from "../report/rapport.js";
 import { filnamnSaker, lasJson, sakerstallMapp, skrivJson } from "../util/fil.js";
@@ -253,6 +255,7 @@ export function analysIn(d: Db, datum: string, doman: string): InUtfall {
 
   const underlag = lasJson<Underlag>(path.join(mapp, "underlag.json"));
   const lankar = lasJson<LankKontroll[]>(path.join(mapp, "lankar.json"));
+  for (const rad of rensaForslag(underlag, analys.fynd)) logg.info(`   ${rad}`);
   d.prepare("DELETE FROM fynd WHERE prospekt_id = ?").run(p.id);
   d.prepare("DELETE FROM bra WHERE prospekt_id = ?").run(p.id);
   const radIds = sparaAnalys(d, p, analys);
@@ -389,9 +392,12 @@ export function utkastIn(d: Db, datum: string, doman: string): InUtfall {
   const f = lasJson<UtkastForberett>(path.join(mapp, "forberett.json"));
   const svar = lasJsonSvar(mapp, "utkast.json");
   let brodtext: string;
+  let extraFel: string[] = [];
   try {
     if (!svar.ok) throw new Error(svar.fel);
-    brodtext = UtkastSchema.parse(svar.data).brodtext;
+    const sammansatt = sammansattBrodtext(UtkastSchema.parse(svar.data).brodtext);
+    brodtext = sammansatt.brodtext;
+    extraFel = sammansatt.fel;
   } catch (e) {
     s.forsok.utkast++;
     const fel = zodFel(e);
@@ -407,7 +413,7 @@ export function utkastIn(d: Db, datum: string, doman: string): InUtfall {
   }
   s.forsok.utkast++;
 
-  const fel = grindKodfel(d, p, { amne: f.amne, brodtext }, f.valda, f.mottagare, f.grindAlt);
+  const fel = grindKodfel(d, p, { amne: f.amne, brodtext }, f.valda, f.mottagare, { ...f.grindAlt, extraFel });
   if (fel.length) {
     if (s.forsok.utkast < MAX_FORSOK) {
       logg.info(`   grinden stoppade utkastet (${fel.join("; ")}), nytt försök`);
@@ -482,12 +488,12 @@ export function discoverMapp(datum: string, segmentId: number): string {
 }
 
 /** Skriver uppgiften till webbsökningen för ett segment. Sessionen söker själv och sparar träffarna i traffar.json. */
-export function discoverPaket(d: Db, datum: string, segmentId: number, antal: number): { mapp: string; maxSok: number; antal: number } {
+export function discoverPaket(d: Db, datum: string, segmentId: number, antal: number, sokningar?: number): { mapp: string; maxSok: number; antal: number } {
   const segment = allaSegment(d).find((s) => s.id === segmentId);
   if (!segment) throw new Error(`Segment ${segmentId} finns inte`);
   const kp = lasKundprofil();
   const kanda = kandaDomaner(d);
-  const u = discoverUppgift(d, kp, segment, antal, kanda);
+  const u = discoverUppgift(d, kp, segment, antal, kanda, sokningar);
   const mapp = discoverMapp(datum, segmentId);
   fs.writeFileSync(path.join(mapp, "discover-system.md"), u.system, "utf8");
   fs.writeFileSync(path.join(mapp, "discover-uppgift.md"), u.text, "utf8");
@@ -495,22 +501,103 @@ export function discoverPaket(d: Db, datum: string, segmentId: number, antal: nu
   return { mapp, maxSok: u.maxSok, antal };
 }
 
+/** En träff från sessionen: webbplatsen och var den hittades. En domän får bara komma från ett sökresultat eller en hämtad sida. */
+export const PassTraffSchema = z.object({
+  namn: z.string(),
+  url: z.string(),
+  varfor: z.string().optional(),
+  /** Adressen till sökresultatet eller den sida där domänen hittades. */
+  hittad_via: z.string(),
+});
+export type PassTraff = z.infer<typeof PassTraffSchema>;
+
+/** Hämtar råa HTML för en sida, för katalogvägen och för att kontrollera var en domän hittades. */
+export async function hamtaHtml(url: string, timeoutMs = 20000): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const svar = await fetch(url, { headers: { "user-agent": USER_AGENT, accept: "text/html,*/*" }, redirect: "follow", signal: ctrl.signal });
+    clearTimeout(t);
+    if (!svar.ok) return null;
+    return await svar.text();
+  } catch {
+    return null;
+  }
+}
+
+/** Plattformar och kataloger som aldrig är en kandidats egen sajt. */
+const INTE_EGEN_SAJT = /(^|\.)(facebook|instagram|linkedin|youtube|vimeo|twitter|x|tiktok|pinterest|google|wikipedia|hitta|eniro|allabolag|bokadirekt|reco|ratsit|merinfo|bolagsfakta|svenskakyrkan|behance|dribbble|etsy|tradera|blocket|apple|microsoft|wordpress|wix|squarespace|godaddy|one|loopia|cloudflare|gstatic|googleapis|facebook\.net|addthis|sharethis|mailchimp|spotify|soundcloud|bandcamp|issuu)\.[a-z]+$/i;
+
 /**
- * Läser sessionens träffar (traffar.json eller en text med ett json-kodblock), sparar dem i soktraffar, hämtar varje
- * kandidat och kör förfiltrets kodregler. Kandidater som klarar koden får ett förfilterpaket för en underagent.
+ * Katalogvägen: hämtar en medlemslista eller ett register och plockar ut de externa webbplatser den länkar till.
+ * Lägger dem till traffar.json i segmentets mapp med hittad_via satt till katalogens adress.
  */
-export async function discoverIn(d: Db, datum: string, segmentId: number, fil?: string): Promise<{ traffar: number; bortvaldaAvKod: number; tillForfilter: string[] }> {
+export async function discoverKatalog(d: Db, datum: string, segmentId: number, katalogUrl: string, varfor?: string): Promise<{ lankar: number; nya: number; fil: string }> {
+  const mapp = discoverMapp(datum, segmentId);
+  const html = await hamtaHtml(katalogUrl);
+  if (!html) throw new Error(`Kunde inte hämta ${katalogUrl}`);
+  const $ = cheerio.load(html);
+  const egen = normaliseraDoman(katalogUrl);
+  const kanda = kandaDomaner(d);
+  const fil = path.join(mapp, "traffar.json");
+  const befintliga: PassTraff[] = fs.existsSync(fil) ? (JSON.parse(fs.readFileSync(fil, "utf8")) as PassTraff[]) : [];
+  const har = new Set(befintliga.map((t) => normaliseraDoman(t.url)));
+  let lankar = 0;
+  const nya: PassTraff[] = [];
+  $("a[href]").each((_, a) => {
+    const href = String($(a).attr("href") ?? "");
+    if (!/^https?:\/\//i.test(href)) return;
+    const dom = normaliseraDoman(href);
+    if (!dom || dom === egen || kanda.has(dom) || har.has(dom) || INTE_EGEN_SAJT.test(dom)) return;
+    lankar++;
+    har.add(dom);
+    const namn = $(a).text().replace(/\s+/g, " ").trim() || dom;
+    nya.push({ namn: namn.slice(0, 80), url: href, varfor: varfor ?? `länkad från ${katalogUrl}`, hittad_via: katalogUrl });
+  });
+  fs.writeFileSync(fil, JSON.stringify([...befintliga, ...nya], null, 2), "utf8");
+  return { lankar, nya: nya.length, fil };
+}
+
+/**
+ * Läser sessionens träffar (traffar.json), kräver att varje domän kommer från ett sökresultat eller en hämtad sida,
+ * sparar dem i soktraffar, hämtar varje kandidat och kör förfiltrets kodregler. Kandidater som klarar koden får ett
+ * förfilterpaket för en underagent.
+ */
+export async function discoverIn(d: Db, datum: string, segmentId: number, fil?: string): Promise<{ traffar: number; avvisade: string[]; bortvaldaAvKod: number; tillForfilter: string[] }> {
   const segment = allaSegment(d).find((s) => s.id === segmentId);
   if (!segment) throw new Error(`Segment ${segmentId} finns inte`);
   const mapp = discoverMapp(datum, segmentId);
   const kalla = fil ?? path.join(mapp, "traffar.json");
   if (!fs.existsSync(kalla)) throw new Error(`${kalla} saknas`);
-  const text = fs.readFileSync(kalla, "utf8");
+  const lista = z.array(PassTraffSchema).parse(JSON.parse(fs.readFileSync(kalla, "utf8")));
   const kanda = kandaDomaner(d);
-  const traffar = tolkaTrafflista(text.trim().startsWith("[") ? `\`\`\`json\n${text}\n\`\`\`` : text, segment, kanda, "pass:webb");
+
+  // Varje domän måste ha hittats någonstans: i ett sökresultat som pekar på sajten, eller på en hämtad sida som länkar dit
+  const avvisade: string[] = [];
+  const godtagna: Traff[] = [];
+  const hamtadeSidor = new Map<string, string | null>();
+  for (const t of lista) {
+    const dom = normaliseraDoman(t.url);
+    if (!dom || kanda.has(dom)) continue;
+    const viaDom = normaliseraDoman(t.hittad_via);
+    let ok = viaDom === dom;
+    if (!ok) {
+      if (!hamtadeSidor.has(t.hittad_via)) hamtadeSidor.set(t.hittad_via, await hamtaHtml(t.hittad_via));
+      const html = hamtadeSidor.get(t.hittad_via);
+      ok = !!html && html.toLowerCase().includes(dom.toLowerCase());
+    }
+    if (!ok) {
+      avvisade.push(`${dom} (hittad_via ${t.hittad_via} pekar inte på sajten och länkar inte dit)`);
+      continue;
+    }
+    kanda.add(dom);
+    godtagna.push({ doman: dom, namn: t.namn || null, kalla: viaDom === dom ? "pass:webb" : `pass:katalog:${viaDom ?? "okänd"}`, segmentId: segment.id, kundtyp: segment.kundtyp, varfor: t.varfor ?? null });
+  }
+  const traffar = godtagna;
   d.prepare("UPDATE segment SET anvand = 1, traffar = traffar + ? WHERE id = ?").run(traffar.length, segment.id);
   sparaSoktraffar(d, traffar.map((t) => ({ segment_id: t.segmentId, kundtyp: t.kundtyp, kalla: t.kalla, doman: t.doman, namn: t.namn, varfor: t.varfor })));
-  skrivJson(path.join(mapp, "traffar-tolkade.json"), traffar);
+  skrivJson(path.join(mapp, "traffar-tolkade.json"), { traffar, avvisade });
+  for (const a of avvisade) logg.varning(`   avvisad: ${a}`);
 
   const kp = lasKundprofil();
   const insKandidat = d.prepare("INSERT OR IGNORE INTO kandidater (doman, namn, kalla, segment_id, kundtyp, likhet, utfall, orsak) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
@@ -548,7 +635,7 @@ export async function discoverIn(d: Db, datum: string, segmentId: number, fil?: 
     [`Bedöm varje kandidat för sig med bara dess fil som underlag:`, ...tillForfilter.map((dom) => `- ${dom}: ${filnamnSaker(dom)}.md, svar i ${filnamnSaker(dom)}-svar.json`), ``, `Varje svar följer forfilter-schema.json.`].join("\n"),
     "utf8",
   );
-  return { traffar: traffar.length, bortvaldaAvKod: bortvalda, tillForfilter };
+  return { traffar: traffar.length, avvisade, bortvaldaAvKod: bortvalda, tillForfilter };
 }
 
 /** Läser underagentens förfiltersvar och lägger godkända kandidater som prospekt, precis som discover gör via API. */

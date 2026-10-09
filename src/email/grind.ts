@@ -4,6 +4,7 @@ import type { Db } from "../db/index.js";
 import { arSparrad, harFattMejl, type FyndRad, type Prospekt } from "../db/fragor.js";
 import { lasPrompt, strukturerat } from "../analyze/klient.js";
 import { normaliseraText } from "../analyze/verifiering.js";
+import { faktafel, type Faktakallor } from "./fakta.js";
 import { giltig } from "./kontakter.js";
 
 export interface Grindresultat {
@@ -133,14 +134,19 @@ export interface GrindAlternativ {
   profil?: string | null;
   tilltal?: Tilltal;
   flerFynd?: number | null;
+  /** Källor för faktaspårningen. Utan källor görs ingen spårning. */
+  kallor?: Faktakallor | null;
+  /** Fel som uppstod innan grinden, till exempel att modellen skrev presentationen själv. */
+  extraFel?: string[];
 }
 
-/** Grindens kodkontroller: språkregler, tilläggets regler, ämnesrad, antal fynd, verifiering, mottagare och spärrlista. */
+/** Grindens kodkontroller: språkregler, tilläggets regler, faktaspårning, ämnesrad, antal fynd, verifiering, mottagare och spärrlista. */
 export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext: string }, fynd: FyndRad[], mottagare: string | null, alt: GrindAlternativ = {}): string[] {
   const k = konfig();
-  const fel: string[] = [];
+  const fel: string[] = [...(alt.extraFel ?? [])];
   fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
   fel.push(...tillaggsfel(utkast.brodtext, fynd, alt.flerFynd ?? null));
+  if (alt.kallor) fel.push(...faktafel(utkast.brodtext, alt.kallor));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);
   if (!namnEllerDoman.some((n) => utkast.amne.toLowerCase().includes(n.toLowerCase().replace(/^www\./, "")))) {

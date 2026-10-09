@@ -15,9 +15,11 @@ import {
   type FyndRad,
   type Prospekt,
 } from "../db/fragor.js";
-import { rapportSokvag } from "../report/rapport.js";
-import { dataMapp, filnamnSaker } from "../util/fil.js";
+import { rapportSokvag, underlagSokvag } from "../report/rapport.js";
+import type { Underlag } from "../analyze/underlag.js";
+import { dataMapp, filnamnSaker, lasJson } from "../util/fil.js";
 import { logg } from "../util/logg.js";
+import { byggFaktakallor, medPresentation, type Faktakallor } from "./fakta.js";
 import { byggAmne, kvalitetsgrind, MAX_ORD, MIN_ORD, type Grindresultat, type Tilltal } from "./grind.js";
 import { bastaKontakt, sparaKontakter, utvinnKontakter } from "./kontakter.js";
 import { valjFynd } from "./val.js";
@@ -198,7 +200,7 @@ export interface UtkastForberett {
   bra: { text: string; url: string | null }[];
   /** Bekräftade fynd som inte används i mejlet, eller null när MEJL_FLER_FYND är av. */
   flerFynd: number | null;
-  grindAlt: { testlage: boolean; huvudinsikt: string; profil: string; tilltal: Tilltal; flerFynd: number | null };
+  grindAlt: { testlage: boolean; huvudinsikt: string; profil: string; tilltal: Tilltal; flerFynd: number | null; kallor: Faktakallor };
 }
 
 export type UtkastHinder = { typ: "redan_mejl" } | { typ: "inget_mejl"; orsak: string } | { typ: "ingen_adress" };
@@ -241,8 +243,20 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
 
   // Bekräftade fynd som inte används i mejlet, för meningen före erbjudandet (MEJL_FLER_FYND)
   const flerFynd = k.MEJL_FLER_FYND ? fynd.filter((f) => !valda.includes(f)).length : null;
-  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd };
+  // Källor för faktaspårningen: alla bekräftade fynd, profilpunkter med belägg och de kodräknade måtten
+  const underlagFil = underlagSokvag(p.doman);
+  const underlag = fs.existsSync(underlagFil) ? lasJson<Underlag>(underlagFil) : null;
+  const kallor = byggFaktakallor(p, fynd, profil, underlag);
+  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor };
   return { typ: "klar", valda, huvudinsikt, profil, tilltal, amne, mottagare, bra, flerFynd, grindAlt };
+}
+
+/**
+ * Sätter ihop modellens brödtext med den fasta presentationen. Fel (modellen skrev presentationen själv,
+ * hälsning saknas) läggs till grindens fel så att utkastet görs om.
+ */
+export function sammansattBrodtext(raw: string): { brodtext: string; fel: string[] } {
+  return medPresentation(raw);
 }
 
 /** Loggar och sätter status för ett hinder, så som utkaststeget alltid har gjort. */
@@ -287,12 +301,12 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
     return null;
   }
   const forsok = alt.forsok ?? 2;
-  let utkast = await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, [], f.flerFynd);
-  let grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, f.grindAlt);
+  let utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, [], f.flerFynd)).brodtext);
+  let grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, { ...f.grindAlt, extraFel: utkast.fel });
   for (let i = 1; i < forsok && !grind.godkand; i++) {
     logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
-    utkast = await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, grind.fel, f.flerFynd);
-    grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, f.grindAlt);
+    utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, grind.fel, f.flerFynd)).brodtext);
+    grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, { ...f.grindAlt, extraFel: utkast.fel });
   }
   return sparaUtkastResultat(d, p, f, utkast.brodtext, grind);
 }

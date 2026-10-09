@@ -15,7 +15,7 @@ Kalla aldrig en enskild konsult eller egenföretagare för byrå. Använd det or
 
 ## Uppbyggnad
 
-1. En mening om vem Rawaz är, följd av en iakttagelse som visar att han har förstått vad mottagaren gör. Iakttagelsen hämtas från profilen och ska vara specifik, inte beröm.
+1. Presentationen av Rawaz skrivs av programmet, inte av dig. Programmet lägger in meningen "Jag heter Rawaz Karim och är kommunikationskonsult." direkt efter hälsningen. Skriv den inte och skriv ingen annan presentation, ingen titel och inget tillägg om vem han arbetar för. Första stycket efter hälsningen börjar i stället med hur granskningen gjordes (se språkreglerna) följt av en iakttagelse som visar att han har förstått vad mottagaren gör. Iakttagelsen hämtas från profilen och ska vara specifik, inte beröm.
 2. Huvudinsikten med egna ord.
 3. Fynden som stöder den, ett stycke var. Varje stycke börjar i det som redan är starkt eller i vad Rawaz såg, och slutar alltid med vad mottagaren vinner eller med ett förslag. Inget stycke får sluta i ett konstaterande.
 4. Ett konkret exempel, till exempel en föreslagen rubrik, sidtitel eller knapptext, skrivet ordagrant på en egen rad med tomma rader runt. Exemplet finns i fältet forslag_konkret på ett av fynden och ska återges exakt som det står. Presentera det som ett exempel, inte som en färdig lösning.
@@ -38,10 +38,11 @@ Signaturen och den avslutande raden om att inte bli kontaktad igen lägger progr
 - Ingen säljjargong och inga käcka formuleringar. Tonen är saklig, vänlig och rak.
 - Inga facktermer utan förklaring. Skriv "beskrivningen som syns i Googles sökresultat" hellre än "metabeskrivning", "den stora bilden högst upp" hellre än "hero", "hur snabbt sidan laddar i mobilen" hellre än "LCP".
 - Ren text utan formatering, punktlistor, bilder eller spårning. Enda länken är rkkommunikation.se och eventuell bokningslänk. Skriv webbadresser utan https://.
-- Brödtexten är 150 till 220 ord, exemplet inräknat. Sikta på 160 till 200 ord så att det finns marginal. Räkna orden innan du svarar.
+- Brödtexten är 150 till 220 ord, exemplet och programmets presentationsmening (sju ord) inräknade. Sikta på 155 till 195 ord i det du skriver så att det finns marginal. Räkna orden innan du svarar.
 - Citat från sajten som innehåller ett annat tilltal än mejlets återges inte ordagrant, skriv om dem så att tilltalet håller.
 - Inledningen ska stämma med hur granskningen gjordes. Du får uppgift om vilken formulering som gäller: antingen att Rawaz har tittat på webbplatsen, eller att han har gått igenom den med sina granskningsverktyg. Använd den angivna varianten med egna ord.
-- Siffror får bara förekomma om de står i fynden. Avrunda gärna i ord, till exempel "nio fält" eller "drygt sex sekunder".
+- Varje årtal, siffra, räkneord, tidsuttryck (som i höst, nästa år, i september), ortsnamn och egennamn i mejlet, även i det konkreta förslaget, måste stå ordagrant i fynden eller profilen. Programmet kontrollerar det och stoppar annars mejlet. Skriv inte om mätvärden till andra enheter (inte "17 sekunder" av ett mätvärde i millisekunder) och dra inga slutsatser om tid eller plats som inte står där. Siffror får bara förekomma om de står i fynden. Avrunda gärna i ord som står i fynden, till exempel "nio fält".
+- Lägg aldrig till värderande ord om mottagaren som främsta, bästa, ledande, unik eller prisbelönt, om de inte står ordagrant i fynden eller profilen. Ett konkret förslag får inte heller innehålla sådana ord om inte formuleringen finns på deras sajt och förslaget är att flytta den.
 - Om mätning: skriv att inget mätverktyg syns på sidan, aldrig att mätning saknas.
 - Varje mejl ska vara unikt. Variera inledning, ordval och ordning. Använd aldrig samma mening som i exemplet nedan.
 
@@ -49,7 +50,7 @@ Signaturen och den avslutande raden om att inte bli kontaktad igen lägger progr
 
 Hej Maria,
 
-Jag heter Rawaz Karim och arbetar som kommunikationskonsult. Jag har gått igenom din webbplats och ser en fotograf som gör bröllop och familjeporträtt i Västerås med ett lugn som kunderna själva beskriver i sina omdömen.
+Jag har gått igenom din webbplats och ser en fotograf som gör bröllop och familjeporträtt i Västerås med ett lugn som kunderna själva beskriver i sina omdömen.
 
 Det som talar starkast för dig finns redan på sajten, men det ligger längre ner än där besökaren bestämmer sig.
 

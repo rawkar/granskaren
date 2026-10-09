@@ -3,7 +3,7 @@ import path from "node:path";
 import { analysera, upptrappningsSkal, type AnalysAlternativ } from "./analyze/analys.js";
 import type { Analys } from "./analyze/schema.js";
 import { byggSidUnderlag, type Underlag } from "./analyze/underlag.js";
-import { verifieraFynd, type VerifieringsResultat } from "./analyze/verifiering.js";
+import { rensaForslag, verifieraFynd, type VerifieringsResultat } from "./analyze/verifiering.js";
 import { konfig } from "./config.js";
 import { hamtaSajt } from "./crawl/hamta.js";
 import type { Db } from "./db/index.js";
@@ -213,6 +213,7 @@ export async function analysMedUpptrappning(d: Db, p: Prospekt, underlag: Underl
 export async function analyseraOchVerifiera(d: Db, p: Prospekt, underlag: Underlag, lankar: LankKontroll[], alt: AnalysAlternativ = {}): Promise<AnalysUtfall> {
   logg.steg(`analyserar med språkmodell${alt.modell ? ` (${alt.modell})` : ""}`);
   const analys = await analysera(d, p.id, underlag, alt);
+  for (const rad of rensaForslag(underlag, analys.fynd)) logg.info(`   ${rad}`);
   const radIds = sparaAnalys(d, p, analys);
 
   // Verifiering
