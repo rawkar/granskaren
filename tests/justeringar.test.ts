@@ -108,14 +108,22 @@ describe("4. rytmen", () => {
 });
 
 describe("5. den fasta meningen om fler fynd", () => {
-  it("läser fem varianter per tilltal ur prompts/fler-fynd.md", () => {
+  it("läser fem pluralvarianter och en singularvariant per tilltal ur prompts/fler-fynd.md", () => {
     const m = lasFlerFyndMeningar();
-    expect(m.du).toHaveLength(5);
-    expect(m.ni).toHaveLength(5);
-    expect(m.du.every((x) => !/\b(ni|er|era)\b/i.test(x))).toBe(true);
-    expect(m.ni.every((x) => !/\b(du|dig|din)\b/i.test(x))).toBe(true);
-    expect(flerFyndMening("ni", 7)).toBe(m.ni[2]);
-    expect(flerFyndMening("ni", 7)).toBe(flerFyndMening("ni", 7));
+    expect(m.du.flera).toHaveLength(5);
+    expect(m.ni.flera).toHaveLength(5);
+    expect(m.du.ett).toEqual(["Jag såg en sak till som jag gärna berättar om i ett samtal."]);
+    expect(m.ni.ett).toHaveLength(1);
+    expect(m.du.flera.every((x) => !/\b(ni|er|era)\b/i.test(x))).toBe(true);
+    expect(m.ni.flera.every((x) => !/\b(du|dig|din)\b/i.test(x))).toBe(true);
+    expect(m.du.flera[2]).toBe("Jag såg fler saker som går att förbättra, och dem berättar jag gärna om i ett samtal.");
+  });
+  it("väljer singular vid ett fynd, plural vid minst två, inget vid noll", () => {
+    const m = lasFlerFyndMeningar();
+    expect(flerFyndMening("ni", 7, 1)).toBe(m.ni.ett[0]);
+    expect(flerFyndMening("ni", 7, 2)).toBe(m.ni.flera[2]);
+    expect(flerFyndMening("ni", 7, 3)).toBe(flerFyndMening("ni", 7, 2));
+    expect(flerFyndMening("du", 7, 0)).toBeNull();
   });
   it("lägger meningen som eget stycke före erbjudandet", () => {
     const brod = `${inledning}\n\nGarantin står inte på startsidan.\n\nTre års garanti\n\nJag hjälper gärna till. Mer finns på rkkommunikation.se.\n\nVänliga hälsningar`;

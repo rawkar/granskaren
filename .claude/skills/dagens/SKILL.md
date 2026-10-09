@@ -17,10 +17,20 @@ Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägra
 
 ## 0. Innan du börjar
 
-1. Säg till Rawaz att läsa av claude.ai/settings/usage nu, så att kvoten kan jämföras efter passet.
-2. Kontrollera `.env`: `RUN_PAUSAD=true` (så att den schemalagda API-körningen inte går samma dag) och `SANDLAGE=granska` (så att alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
-3. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
-4. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
+1. Sessionsgränsen. Be Rawaz läsa av `/usage` (eller claude.ai/settings/usage) och säga hur stor andel av sessionsgränsen som är kvar, om han inte redan angav den som argument (`/dagens 60` betyder 60 procent kvar). Välj antalet sajter efter det, hellre färre sajter än ett pass som avbryts mitt i:
+
+   | Kvar av sessionsgränsen | Antal sajter (`--antal`) |
+   |---|---|
+   | över 70 procent | 8 |
+   | 40 till 70 procent | 4 |
+   | 20 till 40 procent | 2 |
+   | under 20 procent | kör inte, säg när gränsen återställs |
+
+   Mätningen den 9 oktober 2026: ett pass på fem sajter drog 1,3 miljoner tokens i cache-skrivning och 4,6 miljoner i cache-läsning hos underagenterna, alltså ungefär 1,2 miljoner tokens per sajt. Passledarens egna anrop kostar därutöver lika mycket som dess sammanhang är stort gånger antalet anrop, så kör passet i en ny session med litet sammanhang, aldrig i en session som redan har arbetat länge. Se data/jamforelse/2026-10-09-kvot.md.
+2. Säg till Rawaz att läsa av claude.ai/settings/usage nu, så att kvoten kan jämföras efter passet.
+3. Kontrollera `.env`: `RUN_PAUSAD=true` (så att den schemalagda API-körningen inte går samma dag) och `SANDLAGE=granska` (så att alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
+4. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
+5. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
 
 ## 1. Förbered
 
@@ -32,7 +42,7 @@ Hämtar och mäter sajter med status ny eller kvalificerad och skriver ett arbet
 
 ## 2. Per sajt, i den här ordningen
 
-Kör sajterna en i taget. Mappen är `data/pass/<datum>/<domän>` (domänen med ogiltiga tecken ersatta av understreck, så som `pass status` visar den). Varje underagent startas med Agent-verktyget, med subagent_type enligt nedan, och ett uppdrag som bara anger mappens fullständiga sökväg. Underagenterna har bara verktygen Read och Write.
+Kör sajterna en i taget och starta högst två underagenter samtidigt. Fem Opus-agenter på en gång slog i sessionsgränsen den 9 oktober 2026 och alla fem avbröts. Mappen är `data/pass/<datum>/<domän>` (domänen med ogiltiga tecken ersatta av understreck, så som `pass status` visar den). Varje underagent startas med Agent-verktyget, med subagent_type enligt nedan, och ett uppdrag som bara anger mappens fullständiga sökväg. Underagenterna har bara verktygen Read och Write.
 
 | Steg | Underagent | Skriver | Sedan kör du |
 |---|---|---|---|
@@ -77,6 +87,10 @@ Samma utskick som i dag: köade mejl inom sändfönstret och dagens tak, med slu
 1. `pass status` och sammanfatta: per sajt antal fynd, bekräftade, utfall i grinden och antal försök.
 2. `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll --sedan <numret från steg 0>`. Det ska stå 0 API-anrop. Visa raden för Rawaz.
 3. Säg till Rawaz att läsa av claude.ai/settings/usage igen och notera hur mycket passet drog.
+
+## Om sessionsgränsen slår till
+
+En underagent som avbryts med "session limit" (429) har inte skrivit sin resultatfil. Starta då inga fler underagenter. Lämna arbetspaketen som de är, kör `pass status`, och säg till Rawaz vilket klockslag gränsen återställs (står i felet). Efter återställningen fortsätter passet med samma kommandon från det steg statusen visar; paketen behöver inte skrivas om.
 
 ## Om sessionen stängs mitt i
 

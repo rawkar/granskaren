@@ -100,24 +100,40 @@ export function flerFyndText(flerFynd: number | null): string {
   return "\n\n## Fler fynd\n\nSkriv inte att Rawaz såg fler saker på sajten som går att förbättra. Finns det fler bekräftade fynd lägger programmet självt till en mening om det före erbjudandet, och den räknas inte i ordgränsen.";
 }
 
-/** Läser prompts/fler-fynd.md: rubrikerna "## du" och "## ni" följda av varianter på rader som börjar med "- ". */
-export function lasFlerFyndMeningar(): Record<Tilltal, string[]> {
-  const ut: Record<Tilltal, string[]> = { du: [], ni: [] };
+export interface FlerFyndMeningar {
+  /** Pluralvarianterna, används när minst två bekräftade fynd står utanför mejlet. */
+  flera: string[];
+  /** Singularvarianterna, används när exakt ett bekräftat fynd står utanför mejlet. */
+  ett: string[];
+}
+
+/**
+ * Läser prompts/fler-fynd.md: rubrikerna "## du" och "## ni" följda av pluralvarianter på rader som börjar med "- ",
+ * och "## du, ett fynd" respektive "## ni, ett fynd" för singularvarianten.
+ */
+export function lasFlerFyndMeningar(): Record<Tilltal, FlerFyndMeningar> {
+  const ut: Record<Tilltal, FlerFyndMeningar> = { du: { flera: [], ett: [] }, ni: { flera: [], ett: [] } };
   const fil = path.join(PROMPT_DIR, "fler-fynd.md");
   if (!fs.existsSync(fil)) return ut;
-  let aktuell: Tilltal | null = null;
+  let aktuell: string[] | null = null;
   for (const rad of fs.readFileSync(fil, "utf8").split(/\r?\n/)) {
     const r = rad.trim();
-    const rubrik = r.match(/^##\s+(du|ni)\b/i);
-    if (rubrik) aktuell = rubrik[1].toLowerCase() as Tilltal;
-    else if (aktuell && r.startsWith("- ")) ut[aktuell].push(r.slice(2).trim());
+    const rubrik = r.match(/^##\s+(du|ni)\b(.*)$/i);
+    if (rubrik) aktuell = ut[rubrik[1].toLowerCase() as Tilltal][/ett fynd/i.test(rubrik[2]) ? "ett" : "flera"];
+    else if (r.startsWith("#")) aktuell = null;
+    else if (aktuell && r.startsWith("- ")) aktuell.push(r.slice(2).trim());
   }
   return ut;
 }
 
-/** Den fasta meningen om fler fynd för ett prospekt: varianten väljs ur filen utifrån prospektets id, så att omtag ger samma mening. */
-export function flerFyndMening(tilltal: Tilltal, prospektId: number): string | null {
-  const varianter = lasFlerFyndMeningar()[tilltal];
+/**
+ * Den fasta meningen om fler fynd för ett prospekt. antal är antalet bekräftade fynd utanför mejlet: vid ett används
+ * singularvarianten, vid minst två en pluralvariant vald utifrån prospektets id, så att omtag ger samma mening.
+ */
+export function flerFyndMening(tilltal: Tilltal, prospektId: number, antal: number): string | null {
+  if (antal < 1) return null;
+  const m = lasFlerFyndMeningar()[tilltal];
+  const varianter = antal === 1 ? m.ett : m.flera;
   if (!varianter.length) return null;
   return varianter[Math.abs(prospektId) % varianter.length];
 }
@@ -316,7 +332,7 @@ export function hanteraUtkastHinder(d: Db, p: Prospekt, h: UtkastHinder): void {
 
 /** Sparar det färdiga utkastet med grindens utfall: mejlrad, status, händelse och fil i data/utkast. */
 export function sparaUtkastResultat(d: Db, p: Prospekt, f: UtkastForberett, brodtext: string, grind: Grindresultat): Utkast {
-  const medFler = f.flerFynd && f.flerFynd > 0 ? medFlerFynd(brodtext, flerFyndMening(f.tilltal.tilltal, p.id)) : brodtext;
+  const medFler = f.flerFynd && f.flerFynd > 0 ? medFlerFynd(brodtext, flerFyndMening(f.tilltal.tilltal, p.id, f.flerFynd)) : brodtext;
   const text = sattIhop(medFler, f.tilltal.tilltal);
   const status = grind.utfall === "stoppad" ? "utkast" : grind.utfall;
   d.prepare("DELETE FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status IN ('utkast', 'i_granskning')").run(p.id);
