@@ -108,6 +108,8 @@ const schema = z.object({
   SANDLAGE: z.enum(["granska", "auto"]).optional().default("granska"),
   /** true gör att den schemalagda API-körningen (run) avslutar direkt. Sätts den dag ett pass körs i stället. */
   RUN_PAUSAD: bool,
+  /** true pausar alla utskick: köade mejl ligger kvar tills Rawaz släpper dem. */
+  SAND_PAUSAD: bool,
   TORRKORNING: bool,
   MAX_MEJL_PER_DAG: heltal(8),
   SANDFONSTER_START: klockslag.optional().default("08:30"),

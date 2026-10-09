@@ -372,6 +372,34 @@ export function verifieringIn(d: Db, datum: string, doman: string): InUtfall {
   return { ok: true, nasta: "utkast", meddelande: `${utfall.bekraftade} av ${analys.fynd.length} fynd bekräftade. Utkast på fynd ${f.valda.map((x) => x.fynd_id).join(", ")} till ${f.mottagare}` };
 }
 
+/**
+ * Skriver ett utkastpaket för ett redan granskat prospekt utan att göra om analysen. Används när mejl skrivs om
+ * efter en regeländring. Med igen skrivs paketet även om prospektet redan har ett köat eller skickat mejl; då sparas
+ * det nya utkastet bara om det gamla mejlet inte är skickat (databasen tillåter ett förstamejl per prospekt).
+ */
+export function utkastPaket(d: Db, datum: string, doman: string, igen = false): InUtfall {
+  const p = hamtaProspektViaDoman(d, doman);
+  if (!p) throw new Error(`${doman} finns inte i databasen`);
+  const mapp = sakerstallMapp(sajtMapp(datum, doman));
+  const statusFil = path.join(mapp, "status.json");
+  const s: SajtStatus = fs.existsSync(statusFil)
+    ? lasJson<SajtStatus>(statusFil)
+    : { doman: p.doman, prospektId: p.id, steg: "forberedd", forsok: { analys: 0, verifiering: 0, utkast: 0, grind: 0 }, utfall: null, tider: { start: new Date().toISOString() }, uppdaterad: new Date().toISOString() };
+  s.forsok.utkast = 0;
+  s.forsok.grind = 0;
+  skrivJson(path.join(mapp, "prospekt.json"), p);
+  const f = forberedUtkast(d, p, { igen });
+  if (f.typ !== "klar") {
+    const text = f.typ === "inget_mejl" ? f.orsak : f.typ === "redan_mejl" ? "har redan fått mejl" : "ingen mejladress";
+    sparaStatus(datum, s, "granskningsko", `inget mejl: ${text}`);
+    return { ok: false, nyttForsok: false, fel: `inget mejl: ${text}` };
+  }
+  skrivJson(path.join(mapp, "forberett.json"), f);
+  skrivUtkastPaket(mapp, p, f, []);
+  sparaStatus(datum, s, "utkast");
+  return { ok: true, nasta: "utkast", meddelande: `Utkast på fynd ${f.valda.map((x) => x.fynd_id).join(", ")} till ${f.mottagare}` };
+}
+
 function skrivUtkastPaket(mapp: string, p: Prospekt, f: UtkastForberett, tidigareFel: string[]): void {
   fs.writeFileSync(path.join(mapp, "utkast-system.md"), utkastSystem(f.flerFynd), "utf8");
   fs.writeFileSync(path.join(mapp, "utkast-uppgift.md"), utkastText(utkastUppgifter(p, f.valda, f.huvudinsikt, f.profil, f.tilltal, tidigareFel, f.flerFynd)), "utf8");

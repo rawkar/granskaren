@@ -19,8 +19,8 @@ import { rapportSokvag, underlagSokvag } from "../report/rapport.js";
 import type { Underlag } from "../analyze/underlag.js";
 import { dataMapp, filnamnSaker, lasJson } from "../util/fil.js";
 import { logg } from "../util/logg.js";
-import { byggFaktakallor, medPresentation, type Faktakallor } from "./fakta.js";
-import { byggAmne, kvalitetsgrind, MAX_ORD, MIN_ORD, type Grindresultat, type Tilltal } from "./grind.js";
+import { byggFaktakallor, medPresentation, PRESENTATION, type Faktakallor } from "./fakta.js";
+import { byggAmne, kvalitetsgrind, lasForbjudnaFraser, MAX_ORD, MIN_ORD, type Grindresultat, type Tilltal } from "./grind.js";
 import { bastaKontakt, sparaKontakter, utvinnKontakter } from "./kontakter.js";
 import { valjFynd } from "./val.js";
 
@@ -109,7 +109,9 @@ export function flerFyndText(flerFynd: number | null): string {
 /** Systemprompten för mejlet: prompts/mejl.md med tilläggen för längd och fler fynd. Samma text i API-vägen och i passet. */
 export function utkastSystem(flerFynd: number | null): string {
   const k = konfig();
-  return lasPrompt("mejl") + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD) + flerFyndText(flerFynd);
+  const forbjudna = lasForbjudnaFraser();
+  const fraser = forbjudna.length ? `\n\n## Förbjudna fraser\n\nDe här fraserna får inte förekomma någonstans i mejlet, programmet stoppar annars utkastet:\n${forbjudna.map((f) => `- ${f}`).join("\n")}` : "";
+  return lasPrompt("mejl") + fraser + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD) + flerFyndText(flerFynd);
 }
 
 /** Uppgifterna modellen får, som JSON-objekt. */
@@ -123,10 +125,7 @@ export function utkastUppgifter(
   flerFynd: number | null = null,
 ): Record<string, unknown> {
   const k = konfig();
-  const inledning =
-    k.SANDLAGE === "auto"
-      ? "Rawaz har INTE sett sajten själv. Inledningen ska säga att han har gått igenom webbplatsen med sina granskningsverktyg."
-      : "Rawaz läser utkastet innan det skickas. Inledningen får säga att han har tittat på webbplatsen.";
+  const inledning = `Första stycket: programmet skriver "${PRESENTATION}". Du skriver en enda mening till i det stycket: "Jag har gått igenom ${tilltal.tilltal === "du" ? "din" : "er"} webbplats och har några förslag som jag tror kan ge ${tilltal.tilltal === "du" ? "dig" : "er"} fler ..." med ett vanligt ord för det verksamheten vill ha. Nämn aldrig verktyg och beskriv inte verksamheten.`;
   return {
     organisation: { namn: p.namn, doman: p.doman, organisationstyp: p.organisationstyp, bransch: p.bransch, ort: p.ort },
     tilltal: tilltal.tilltal,
@@ -186,6 +185,8 @@ export async function skrivUtkast(
 export interface DraftAlternativ {
   testTill?: string; // skicka till den här adressen i stället för organisationens (testläge)
   forsok?: number;
+  /** Skriv om utkastet även om prospektet redan har ett köat eller skickat mejl. Används när mejl skrivs om efter en regeländring, mot en kopia eller för ej skickade mejl. */
+  igen?: boolean;
 }
 
 /** Allt som behövs för att skriva och granska ett utkast, framtaget utan modell. */
@@ -211,7 +212,7 @@ export type UtkastHinder = { typ: "redan_mejl" } | { typ: "inget_mejl"; orsak: s
  */
 export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): UtkastForberett | UtkastHinder {
   const k = konfig();
-  if (harFattMejl(d, p.id)) return { typ: "redan_mejl" };
+  if (!alt.igen && harFattMejl(d, p.id)) return { typ: "redan_mejl" };
   const fynd = fyndForProspekt(d, p.id, true);
   const huvudinsikt = p.huvudinsikt ? (JSON.parse(p.huvudinsikt) as Huvudinsikt) : null;
   const profil = p.profil ? (JSON.parse(p.profil) as Profil) : null;
@@ -247,7 +248,7 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   const underlagFil = underlagSokvag(p.doman);
   const underlag = fs.existsSync(underlagFil) ? lasJson<Underlag>(underlagFil) : null;
   const kallor = byggFaktakallor(p, fynd, profil, underlag);
-  const grindAlt = { testlage: !!alt.testTill, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor };
+  const grindAlt = { testlage: !!alt.testTill || !!alt.igen, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor };
   return { typ: "klar", valda, huvudinsikt, profil, tilltal, amne, mottagare, bra, flerFynd, grindAlt };
 }
 

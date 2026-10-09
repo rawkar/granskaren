@@ -67,6 +67,7 @@ export function nyttMessageId(avsandare: string): string {
 
 /** Varför ett mejl inte får skickas just nu, eller null om det är fritt fram. */
 export function hinder(d: Db, k: Konfig, m: MejlRad, nu = new Date()): string | null {
+  if (k.SAND_PAUSAD) return "utskicken är pausade (SAND_PAUSAD=true i .env)";
   if (!m.mottagare) return "mottagare saknas";
   if (arSparrad(d, m.mottagare)) return "mottagaren finns på spärrlistan";
   const p = hamtaProspekt(d, m.prospekt_id);
@@ -229,7 +230,7 @@ export async function skickaKoade(d: Db, alt: SandAlternativ = {}): Promise<{ sk
     if (stopp) {
       res.stoppade++;
       logg.info(`   ${p?.doman ?? m.prospekt_id}: ${stopp}`);
-      if (/fönstret|vardag|tak/.test(stopp)) break; // tidsregler stoppar hela körningen
+      if (/fönstret|vardag|tak|pausade/.test(stopp)) break; // tidsregler och paus stoppar hela körningen
       continue;
     }
     if (antal > 0) {

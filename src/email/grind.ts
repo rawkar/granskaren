@@ -1,10 +1,12 @@
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
-import { konfig } from "../config.js";
+import { konfig, PROMPT_DIR } from "../config.js";
 import type { Db } from "../db/index.js";
 import { arSparrad, harFattMejl, type FyndRad, type Prospekt } from "../db/fragor.js";
 import { lasPrompt, strukturerat } from "../analyze/klient.js";
 import { normaliseraText } from "../analyze/verifiering.js";
-import { faktafel, type Faktakallor } from "./fakta.js";
+import { egennamn, faktafel, type Faktakallor } from "./fakta.js";
 import { giltig } from "./kontakter.js";
 
 export interface Grindresultat {
@@ -93,6 +95,73 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string, t
 /** Formuleringar som påstår att det finns fler saker att förbättra. Får bara finnas när det finns fler bekräftade fynd. */
 export const FLER_FYND = /fler (saker|förbättringar|punkter|iakttagelser|detaljer|möjligheter|förslag|ställen|områden)|flera (andra )?(saker|förbättringar|iakttagelser)|mer (som|att) (går att )?förbättra|ytterligare (saker|förbättringar|iakttagelser|punkter)/i;
 
+/** Läser prompts/forbjudna-fraser.md: rader som börjar med "- ", parenteser bortskalade, varianter skilda med " / ". */
+export function lasForbjudnaFraser(): string[] {
+  const fil = path.join(PROMPT_DIR, "forbjudna-fraser.md");
+  if (!fs.existsSync(fil)) return [];
+  const ut: string[] = [];
+  for (const rad of fs.readFileSync(fil, "utf8").split(/\r?\n/)) {
+    if (!rad.trim().startsWith("- ")) continue;
+    const utanParentes = rad.trim().slice(2).replace(/\([^)]*\)/g, "");
+    for (const del of utanParentes.split(" / ")) {
+      const f = del.trim();
+      if (f) ut.push(f);
+    }
+  }
+  return ut;
+}
+
+export const MAX_ORD_HUVUDPOANG = 12;
+
+/** Delar brödtexten i stycken utan hälsningsraden. */
+export function stycken(brodtext: string): string[] {
+  const alla = brodtext
+    .replace(/\r\n/g, "\n")
+    .split(/\n\s*\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return alla.filter((s, i) => !(i === 0 && /^hej\b/i.test(s)));
+}
+
+function meningar(stycke: string): string[] {
+  return stycke
+    .split(/(?<=[.!?])\s+/)
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Tonreglerna som kontrolleras med kod: första stycket är presentationen plus en mening om att Rawaz har gått igenom
+ * webbplatsen och har förslag, utan årtal, ortsnamn eller egennamn; huvudpoängens första mening är högst tolv ord;
+ * inga förbjudna fraser någonstans.
+ */
+export function tonfel(brodtext: string, forbjudna: string[] = lasForbjudnaFraser()): string[] {
+  const fel: string[] = [];
+  const normal = normaliseraText(brodtext);
+  for (const fras of forbjudna) {
+    const n = normaliseraText(fras);
+    if (n && normal.includes(n)) fel.push(`förbjuden fras: "${fras}"`);
+  }
+  const s = stycken(brodtext);
+  const forsta = s[0] ?? "";
+  const m1 = meningar(forsta);
+  if (m1.length !== 2) fel.push(`första stycket har ${m1.length} meningar, ska vara två: presentationen och att Rawaz har gått igenom webbplatsen och har förslag`);
+  if (!/gått igenom (er|din) webbplats/i.test(forsta)) fel.push('första stycket saknar "Jag har gått igenom er/din webbplats"');
+  if (!/förslag/i.test(forsta)) fel.push("första stycket säger inte att Rawaz har förslag");
+  if (/(?<!\d)(1[89]\d{2}|20\d{2})(?!\d)/.test(forsta)) fel.push("första stycket innehåller ett årtal");
+  const namn = egennamn(forsta);
+  if (namn.length) fel.push(`första stycket innehåller ortsnamn eller egennamn: ${namn.join(", ")}`);
+  if (/\b(som funnits|sedan \d|ligger i|erbjuder|tar emot|driver|säljer|tillverkar)\b/i.test(forsta)) fel.push("första stycket beskriver mottagarens verksamhet");
+  const andra = s[1] ?? "";
+  const m2 = meningar(andra);
+  if (m2.length) {
+    const ord = antalOrd(m2[0]);
+    if (ord > MAX_ORD_HUVUDPOANG) fel.push(`huvudpoängens första mening är ${ord} ord, högst ${MAX_ORD_HUVUDPOANG}`);
+    if (/den som jämför/i.test(m2[0])) fel.push('huvudpoängens första mening har "den som jämför" som subjekt');
+  }
+  return fel;
+}
+
 /**
  * Regler från tillägget som kontrolleras med kod: fyndens djup, konkret förslag på egen rad, siffror.
  * flerFynd är antalet bekräftade fynd utanför mejlet när MEJL_FLER_FYND är på (null när den är av): står det 0
@@ -146,6 +215,7 @@ export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext
   const fel: string[] = [...(alt.extraFel ?? [])];
   fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
   fel.push(...tillaggsfel(utkast.brodtext, fynd, alt.flerFynd ?? null));
+  fel.push(...tonfel(utkast.brodtext));
   if (alt.kallor) fel.push(...faktafel(utkast.brodtext, alt.kallor));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);

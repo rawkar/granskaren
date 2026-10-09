@@ -121,7 +121,7 @@ async function runInre(d: Db, alt: RunAlternativ): Promise<void> {
       const stopp = hinder(d, k, m);
       if (stopp) {
         logg.info(`   ${m.mottagare}: ${stopp}`);
-        if (/fönstret|vardag|tak/.test(stopp)) break;
+        if (/fönstret|vardag|tak|pausade/.test(stopp)) break;
         d.prepare("UPDATE mejl SET status = 'stoppad' WHERE id = ?").run(m.id);
         loggaHandelse(d, m.prospekt_id, "stoppad_vid_utskick", stopp);
         continue;

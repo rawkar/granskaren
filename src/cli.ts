@@ -29,6 +29,7 @@ import {
   senasteKostnadId,
   statusRader,
   utkastIn,
+  utkastPaket,
   verifieringIn,
 } from "./pass/pass.js";
 import { run } from "./run.js";
@@ -315,6 +316,16 @@ pass
   .action((doman: string, o: { datum: string }) => {
     const { d } = passStart();
     skrivInUtfall(doman, verifieringIn(d, o.datum, normaliseraDoman(doman) ?? doman));
+  });
+
+pass
+  .command("utkast-paket <doman>")
+  .description("Skriver ett utkastpaket för ett redan granskat prospekt utan ny analys, till exempel efter en regeländring i mejlprompten")
+  .option("--igen", "även om prospektet redan har ett köat eller skickat mejl", false)
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((doman: string, o: { igen: boolean; datum: string }) => {
+    const { d } = passStart();
+    skrivInUtfall(doman, utkastPaket(d, o.datum, normaliseraDoman(doman) ?? doman, o.igen));
   });
 
 pass
