@@ -11,8 +11,8 @@ import type { FyndRad, Prospekt } from "../db/fragor.js";
 export interface Faktakallor {
   /** Normaliserad text ur bekräftade fynd, profilpunkter med belägg och prospektets uppgifter. */
   text: string;
-  /** Alla tal som förekommer i källtexterna och i de kodräknade måtten, som strängar. */
-  tal: Set<string>;
+  /** Alla tal som förekommer i källtexterna och i de kodräknade måtten, som strängar. En lista så att källorna kan sparas som JSON. */
+  tal: string[];
 }
 
 /** Den fasta presentationen. Skrivs in av programmet, aldrig av modellen. */
@@ -94,7 +94,7 @@ export function byggFaktakallor(p: Pick<Prospekt, "namn" | "doman" | "ort" | "br
       if (s.laddtid_ms !== null) plattaTal(s.laddtid_ms, tal);
     }
   }
-  return { text, tal };
+  return { text, tal: [...tal] };
 }
 
 /** Egennamn: ord med stor bokstav som inte inleder en mening. */
@@ -126,8 +126,9 @@ function finnsOrd(ord: string, text: string): boolean {
 }
 
 /** Fel som gör att utkastet stoppas: uppgifter som inte går att spåra till källorna. */
-export function faktafel(brodtext: string, k: Faktakallor): string[] {
+export function faktafel(brodtext: string, kallor: Faktakallor): string[] {
   const fel: string[] = [];
+  const k = { text: kallor.text, tal: new Set(kallor.tal) };
   const text = brodtext.replace(/rkkommunikation\.se|https?:\/\/\S+/g, " ");
   const normal = normaliseraText(text);
 
