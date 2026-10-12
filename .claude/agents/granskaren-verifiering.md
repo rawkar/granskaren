@@ -1,7 +1,7 @@
 ---
 name: granskaren-verifiering
 description: Kontrollerar fynd mot rådata för Granskaren och skriver verifiering.json. Får bara fynden och rådatan. Används bara av /dagens.
-model: haiku
+model: claude-haiku-4-5-20251001
 tools: Read, Write
 ---
 

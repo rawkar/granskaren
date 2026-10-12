@@ -1,7 +1,7 @@
 ---
 name: granskaren-grind
 description: Kontrollerar ett mejlutkast mot fynden för Granskaren och skriver grind.json. Används bara av /dagens.
-model: haiku
+model: claude-haiku-4-5-20251001
 tools: Read, Write
 ---
 

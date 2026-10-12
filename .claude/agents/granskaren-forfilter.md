@@ -1,7 +1,7 @@
 ---
 name: granskaren-forfilter
 description: Förfiltrerar kandidatsajter för Granskaren och skriver ett svar per kandidat. Används bara av /dagens.
-model: haiku
+model: claude-haiku-4-5-20251001
 tools: Read, Write
 ---
 
