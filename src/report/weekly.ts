@@ -67,12 +67,12 @@ export function weekly(d: Db, alt: { justera?: boolean } = {}): string[] {
   const nuvarande = aktuellFordelning(d, kp);
   const utfall: Record<number, { skickade: number; svar: number }> = {};
   for (const r of totalt) if (r.kundtyp) utfall[r.kundtyp] = { skickade: r.skickade, svar: r.svar };
-  const ny = justeraFordelning(nuvarande, utfall, kp.minstaAndel);
+  const ny = justeraFordelning(nuvarande, utfall, kp.maxAndelKundtyp1);
   rader.push("");
   rader.push(`Fördelning nu: ${Object.entries(nuvarande).map(([t, v]) => `kundtyp ${t} ${v} %`).join(", ")}`);
   const andrad = Object.keys(ny).some((t) => ny[Number(t)] !== nuvarande[Number(t)]);
   if (andrad) {
-    rader.push(`Förslag utifrån svar (minst ${kp.minstaAndel} % per typ): ${Object.entries(ny).map(([t, v]) => `kundtyp ${t} ${v} %`).join(", ")}`);
+    rader.push(`Förslag utifrån svar (högst ${kp.maxAndelKundtyp1} % till kundtyp 1): ${Object.entries(ny).map(([t, v]) => `kundtyp ${t} ${v} %`).join(", ")}`);
     if (alt.justera) {
       sparaFordelning(d, ny);
       rader.push("Fördelningen är uppdaterad och styr nästa segment och discover.");

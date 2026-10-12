@@ -134,7 +134,8 @@ export function prospektMedStatus(
 ): Prospekt[] {
   const lista = Array.isArray(status) ? status : [status];
   const platser = lista.map(() => "?").join(",");
-  const sql = `SELECT * FROM prospekt WHERE status IN (${platser}) ORDER BY id ${antal ? "LIMIT ?" : ""}`;
+  // Egenföretagare (kundtyp 1) läggs sist i kön; prospekt utan kundtyp räknas inte som egenföretagare
+  const sql = `SELECT * FROM prospekt WHERE status IN (${platser}) ORDER BY CASE WHEN kundtyp = 1 THEN 1 ELSE 0 END, id ${antal ? "LIMIT ?" : ""}`;
   const args: unknown[] = [...lista];
   if (antal) args.push(antal);
   return d.prepare(sql).all(...args) as Prospekt[];

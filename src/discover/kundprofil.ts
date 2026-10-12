@@ -17,7 +17,9 @@ export interface Kundprofil {
   var: string;
   valjBort: string[];
   fordelning: Record<number, number>; // procent per kundtyp
-  minstaAndel: number;
+  /** Taket för egenföretagare (kundtyp 1) i procent, också när weekly justerar fördelningen. */
+  maxAndelKundtyp1: number;
+  /** Finns kvar för äldre filer. Används inte längre för att välja bort. */
   minLikhet: number;
 }
 
@@ -77,8 +79,8 @@ export function lasKundprofil(innehall?: string): Kundprofil {
     var: (avsnitt.get("Var") ?? []).join(" ").trim(),
     valjBort: (avsnitt.get("Välj bort") ?? []).map((r) => r.replace(/^\s*-\s*/, "").trim()).filter(Boolean),
     fordelning,
-    minstaAndel: Number.parseFloat(inst.get("minsta_andel") ?? "15"),
-    minLikhet: Number.parseFloat(inst.get("min_likhet") ?? "0.6"),
+    maxAndelKundtyp1: Number.parseFloat(inst.get("max_andel_kundtyp_1") ?? "10"),
+    minLikhet: Number.parseFloat(inst.get("min_likhet") ?? "0"),
   };
 }
 
@@ -122,13 +124,13 @@ export function fordelaAntal(antal: number, fordelning: Record<number, number>):
 }
 
 /**
- * Justerar fördelningen mot de kundtyper som ger svar. Ingen typ går under minsta andel.
- * Typer utan tillräckligt underlag behåller sin nuvarande andel som vikt.
+ * Justerar fördelningen mot de kundtyper som ger svar. Ingen typ har ett golv längre, men egenföretagare
+ * (kundtyp 1) går aldrig över taket maxAndelKundtyp1. Typer utan tillräckligt underlag får genomsnittets vikt.
  */
 export function justeraFordelning(
   nuvarande: Record<number, number>,
   utfall: Record<number, { skickade: number; svar: number }>,
-  minstaAndel: number,
+  maxAndelKundtyp1: number,
   minSkickade = 10,
 ): Record<number, number> {
   const typer = Object.keys(nuvarande).map(Number);
@@ -143,39 +145,38 @@ export function justeraFordelning(
       vikter[t] = -1; // markerar saknat underlag
     }
   }
-  if (!harUnderlag) return { ...nuvarande };
-  // typer utan underlag får en vikt som motsvarar genomsnittet av de som har
+  if (!harUnderlag) return begransaKundtyp1({ ...nuvarande }, maxAndelKundtyp1);
   const kanda = typer.filter((t) => vikter[t] >= 0);
   const snitt = kanda.reduce((s, t) => s + vikter[t], 0) / kanda.length;
   for (const t of typer) if (vikter[t] < 0) vikter[t] = snitt;
   const summa = typer.reduce((s, t) => s + vikter[t], 0);
-  let ut: Record<number, number> = {};
+  const ut: Record<number, number> = {};
   for (const t of typer) ut[t] = (vikter[t] / summa) * 100;
-  // golv: lyft upp till minsta andel och ta från de som ligger över, proportionellt
-  for (let i = 0; i < 5; i++) {
-    const under = typer.filter((t) => ut[t] < minstaAndel);
-    if (under.length === 0) break;
-    let brist = 0;
-    for (const t of under) {
-      brist += minstaAndel - ut[t];
-      ut[t] = minstaAndel;
-    }
-    const over = typer.filter((t) => ut[t] > minstaAndel);
-    const overskott = over.reduce((s, t) => s + (ut[t] - minstaAndel), 0) || 1;
-    for (const t of over) ut[t] -= (brist * (ut[t] - minstaAndel)) / overskott;
+  return begransaKundtyp1(ut, maxAndelKundtyp1);
+}
+
+/** Taket för kundtyp 1: överskottet fördelas på de andra typerna i proportion. Avrundar till heltal som summerar till 100. */
+export function begransaKundtyp1(f: Record<number, number>, tak: number): Record<number, number> {
+  const typer = Object.keys(f).map(Number);
+  const ut: Record<number, number> = { ...f };
+  if (ut[1] !== undefined && ut[1] > tak && typer.length > 1) {
+    const over = ut[1] - tak;
+    ut[1] = tak;
+    const andra = typer.filter((t) => t !== 1);
+    const summaAndra = andra.reduce((s, t) => s + ut[t], 0) || 1;
+    for (const t of andra) ut[t] += (over * ut[t]) / summaAndra;
   }
-  // avrunda till heltal som summerar till 100
   const avr: Record<number, number> = {};
   let rest = 100;
   for (const t of typer) {
     avr[t] = Math.floor(ut[t]);
     rest -= avr[t];
   }
-  for (const t of typer.sort((a, b) => ut[b] - Math.floor(ut[b]) - (ut[a] - Math.floor(ut[a])))) {
+  for (const t of [...typer].sort((a, b) => ut[b] - Math.floor(ut[b]) - (ut[a] - Math.floor(ut[a])))) {
     if (rest <= 0) break;
+    if (t === 1 && avr[t] >= tak) continue;
     avr[t]++;
     rest--;
   }
-  ut = avr;
-  return ut;
+  return avr;
 }

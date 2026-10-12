@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fordelaAntal, justeraFordelning, lasKundprofil } from "../src/discover/kundprofil.js";
+import { begransaKundtyp1, fordelaAntal, justeraFordelning, lasKundprofil } from "../src/discover/kundprofil.js";
 import { tilltalFor } from "../src/email/utkast.js";
 
 const fil = `# Kundprofil
@@ -26,9 +26,8 @@ Stockholm och Mälardalen.
 - Byråer
 
 ## Inställningar
-fordelning: 1=60, 2=40
-minsta_andel: 20
-min_likhet: 0.7
+fordelning: 1=10, 2=90
+max_andel_kundtyp_1: 10
 `;
 
 describe("kundprofil", () => {
@@ -46,9 +45,8 @@ describe("kundprofil", () => {
     ]);
     expect(kp.var).toBe("Stockholm och Mälardalen.");
     expect(kp.valjBort).toEqual(["Myndigheter", "Byråer"]);
-    expect(kp.fordelning).toEqual({ 1: 60, 2: 40 });
-    expect(kp.minstaAndel).toBe(20);
-    expect(kp.minLikhet).toBe(0.7);
+    expect(kp.fordelning).toEqual({ 1: 10, 2: 90 });
+    expect(kp.maxAndelKundtyp1).toBe(10);
     expect(kp.text).not.toContain("anvisning som inte ska läsas");
   });
 });
@@ -60,24 +58,29 @@ describe("fördelning", () => {
     expect(fordelaAntal(9, { 1: 50, 2: 25, 3: 25 })).toEqual({ 1: 5, 2: 2, 3: 2 });
     expect(fordelaAntal(1, { 1: 50, 2: 25, 3: 25 })).toEqual({ 1: 1, 2: 0, 3: 0 });
   });
-  it("ändrar inte fördelningen utan underlag", () => {
-    expect(justeraFordelning({ 1: 50, 2: 25, 3: 25 }, { 1: { skickade: 3, svar: 1 } }, 15)).toEqual({ 1: 50, 2: 25, 3: 25 });
+  it("ändrar inte fördelningen utan underlag, utom att kundtyp 1 hålls under taket", () => {
+    expect(justeraFordelning({ 1: 10, 2: 45, 3: 45 }, { 1: { skickade: 3, svar: 1 } }, 10)).toEqual({ 1: 10, 2: 45, 3: 45 });
+    expect(justeraFordelning({ 1: 50, 2: 25, 3: 25 }, {}, 10)).toEqual({ 1: 10, 2: 45, 3: 45 });
   });
-  it("viktar mot svar men låter ingen typ gå under minsta andel", () => {
+  it("viktar mot svar, utan golv per typ, men kundtyp 1 går aldrig över taket", () => {
     const ny = justeraFordelning(
-      { 1: 50, 2: 25, 3: 25 },
+      { 1: 10, 2: 45, 3: 45 },
       { 1: { skickade: 20, svar: 6 }, 2: { skickade: 20, svar: 0 }, 3: { skickade: 20, svar: 2 } },
-      15,
+      10,
     );
-    expect(ny[1]).toBeGreaterThan(50);
-    expect(ny[2]).toBe(15);
-    expect(ny[3]).toBeGreaterThanOrEqual(15);
+    expect(ny[1]).toBe(10);
+    expect(ny[2]).toBeLessThan(ny[3]);
     expect(ny[1] + ny[2] + ny[3]).toBe(100);
   });
   it("ger typer utan underlag genomsnittets vikt", () => {
-    const ny = justeraFordelning({ 1: 50, 2: 25, 3: 25 }, { 1: { skickade: 20, svar: 4 }, 2: { skickade: 20, svar: 4 } }, 15);
-    for (const t of [1, 2, 3]) expect(ny[t]).toBeGreaterThanOrEqual(33);
-    expect(ny[1] + ny[2] + ny[3]).toBe(100);
+    const ny = justeraFordelning({ 1: 10, 2: 45, 3: 45 }, { 2: { skickade: 20, svar: 4 }, 3: { skickade: 20, svar: 4 } }, 10);
+    expect(ny[1]).toBe(10);
+    expect(ny[2]).toBe(45);
+    expect(ny[3]).toBe(45);
+  });
+  it("fördelar överskottet från kundtyp 1 i proportion och summerar till 100", () => {
+    expect(begransaKundtyp1({ 1: 40, 2: 30, 3: 30 }, 10)).toEqual({ 1: 10, 2: 45, 3: 45 });
+    expect(begransaKundtyp1({ 1: 5, 2: 95 }, 10)).toEqual({ 1: 5, 2: 95 });
   });
 });
 

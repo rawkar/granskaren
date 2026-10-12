@@ -17,6 +17,8 @@ export const ForfilterSchema = z.object({
   ort: z.string().nullable(),
   egen_kommunikationsfunktion: z.boolean(),
   har_personal: z.boolean(),
+  /** Tecken på anställda som modellen ser i texten: kansli, personalsida, namngivna roller, växelnummer, funktionsadresser. */
+  tecken_pa_anstallda: z.array(z.string()),
   saljer_webb_eller_kommunikation: z.boolean(),
   offentlig: z.boolean(),
   sajten_viktig: z.boolean(),
@@ -39,6 +41,17 @@ const STOR_ORGANISATION = /presskontakt|pressansvarig|presschef|pressekreterare|
 const OFFENTLIG = /\b(kommun|region|myndighet|landsting|statlig|förvaltning)\b/i;
 /** Konkurrenter: den som själv säljer kommunikation, webb, marknadsföring eller reklam, även som enskild konsult. */
 const KONKURRENT = /kommunikat|webbyr|webbyrå|marknadsf[oö]ring|reklambyr|pr-?byr|content ?byr|seo-?byr|digital ?byr|copywrit/i;
+/** Tecken på anställda som koden hittar själv i sajtens text eller adresser. */
+const ANSTALLDA = /\b(kansli|kansliet|expedition|expeditionen|personal|medarbetare|v[aä]xel|ordf[oö]rande|kanslichef|verksamhetsledare|verksamhetschef|verkstadschef|platschef|vd|rektor|f[oö]rest[aå]ndare)\b/i;
+const FUNKTIONSADRESS = /^(info|kansli|kontakt|bokning|boka|reception|office|hej|post|expedition|kundtjanst|kundtjänst)@/i;
+
+/** Tecken på anställda som koden ser: ord i texten och funktionsadresser. Används som pluspoäng tillsammans med modellens lista. */
+export function anstalldaTecken(sajt: EnkelSajt): string[] {
+  const ut = new Set<string>();
+  for (const m of sajt.text.matchAll(new RegExp(ANSTALLDA.source, "gi"))) ut.add(m[0].toLowerCase());
+  for (const a of sajt.adresser) if (FUNKTIONSADRESS.test(a)) ut.add(a.toLowerCase());
+  return [...ut];
+}
 
 /** Kodbaserade skäl som avgörs utan modell. Returnerar orsak eller null. */
 export function kodskal(d: Db, doman: string, sajt: EnkelSajt): string | null {
@@ -88,9 +101,14 @@ export function forfilterUppgift(d: Db, kp: Kundprofil, t: Traff, sajt: EnkelSaj
   ].join("\n\n");
 }
 
-/** Kodreglerna på modellens svar: kundtyp, offentlig, konkurrent, egen kommunikationsfunktion, personal och likhet. */
-export function forfilterBedom(kp: Kundprofil, t: Traff, sajt: EnkelSajt, svar: Forfilter): ForfilterResultat {
+/**
+ * Kodreglerna på modellens svar: kundtyp, offentlig, konkurrent, egen kommunikationsfunktion och personal.
+ * Tecken på anställda (modellens lista och kodens egna) räknas som personal. Likhet med förebilderna väljer inte
+ * bort någon, den sparas bara som information.
+ */
+export function forfilterBedom(_kp: Kundprofil, t: Traff, sajt: EnkelSajt, svar: Forfilter): ForfilterResultat {
   const kundtyp = svar.kundtyp ?? t.kundtyp;
+  const tecken = [...new Set([...(svar.tecken_pa_anstallda ?? []), ...anstalldaTecken(sajt)])];
   const res = { kundtyp, likhet: svar.likhet, namn: svar.namn ?? t.namn, yrke: svar.yrke, ort: svar.ort, adress: sajt.adresser[0] ?? null };
   const skal: string[] = [];
   if (!svar.passar || !kundtyp) skal.push("passar ingen kundtyp");
@@ -99,11 +117,11 @@ export function forfilterBedom(kp: Kundprofil, t: Traff, sajt: EnkelSajt, svar: 
   else if (KONKURRENT.test(t.doman) || KONKURRENT.test(svar.yrke ?? "")) skal.push(`säljer själv kommunikation eller webb (${KONKURRENT.exec(t.doman)?.[0] ?? svar.yrke})`);
   if (kundtyp && kundtyp !== 1) {
     if (svar.egen_kommunikationsfunktion || STOR_ORGANISATION.test(sajt.text)) skal.push("egen kommunikationsfunktion");
-    if (!svar.har_personal) skal.push("ingen personal utöver en enskild person");
+    if (!svar.har_personal && tecken.length === 0) skal.push("inga tecken på anställda eller kansli");
   }
-  if (svar.likhet < kp.minLikhet) skal.push(`likhet ${svar.likhet.toFixed(2)} under gränsen ${kp.minLikhet}`);
-  if (skal.length) return { utfall: "bortvald", orsak: `${skal.join(", ")}. ${svar.orsak}`, ...res };
-  return { utfall: "godkand", orsak: svar.orsak, ...res };
+  const plus = tecken.length ? ` Tecken på anställda: ${tecken.slice(0, 6).join(", ")}.` : "";
+  if (skal.length) return { utfall: "bortvald", orsak: `${skal.join(", ")}. ${svar.orsak}${plus}`, ...res };
+  return { utfall: "godkand", orsak: `${svar.orsak}${plus}`, ...res };
 }
 
 export async function hamtaForForfilter(doman: string): Promise<EnkelSajt> {

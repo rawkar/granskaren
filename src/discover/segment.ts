@@ -33,7 +33,28 @@ export function allaSegment(d: Db, baraOanvanda = false): SegmentRad[] {
   return d.prepare(`SELECT * FROM segment ${baraOanvanda ? "WHERE anvand = 0" : ""} ORDER BY kundtyp, id`).all() as SegmentRad[];
 }
 
-/** Tar fram nya segment per kundtyp enligt fördelningen, med likhetsprofilerna som underlag. */
+export const SegmentListaSchema = z.array(
+  z.object({
+    kundtyp: z.number(),
+    yrke: z.string(),
+    ort: z.string(),
+    sokfras: z.string(),
+    motivering: z.string().optional().default(""),
+  }),
+);
+
+/** Lägger in segment från en lista, till exempel skriven i sessionen. Dubbletter (kundtyp, yrke, ort) hoppas över. */
+export function importeraSegment(d: Db, lista: z.infer<typeof SegmentListaSchema>): SegmentRad[] {
+  const ins = d.prepare("INSERT OR IGNORE INTO segment (kundtyp, yrke, ort, sokfras, motivering) VALUES (?, ?, ?, ?, ?)");
+  const nya: SegmentRad[] = [];
+  for (const s of lista) {
+    const r = ins.run(s.kundtyp, s.yrke.trim(), s.ort.trim(), s.sokfras.trim(), s.motivering.trim() || null);
+    if (r.changes > 0) nya.push(d.prepare("SELECT * FROM segment WHERE id = ?").get(Number(r.lastInsertRowid)) as SegmentRad);
+  }
+  return nya;
+}
+
+/** Tar fram nya segment per kundtyp via API. Används inte i driften: segment skrivs i sessionen och läses in med segment --fil. */
 export async function skapaSegment(d: Db, antal: number): Promise<SegmentRad[]> {
   const k = konfig();
   const kp = lasKundprofil();

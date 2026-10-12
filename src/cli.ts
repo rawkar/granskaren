@@ -11,7 +11,7 @@ import { review } from "./email/review.js";
 import { skapaUtkast } from "./email/utkast.js";
 import { skickadeMejl, skickaKoade, skickaTest } from "./email/skicka.js";
 import { profileraForebilder } from "./discover/forebilder.js";
-import { allaSegment, skapaSegment } from "./discover/segment.js";
+import { allaSegment, importeraSegment, SegmentListaSchema, skapaSegment } from "./discover/segment.js";
 import { discover } from "./discover/discover.js";
 import { utfallPerKundtyp, weekly } from "./report/weekly.js";
 import { avbrytPaus, pausad, tillampaPaus } from "./report/vakt.js";
@@ -177,13 +177,20 @@ program
 program
   .command("segment")
   .description("Tar fram kombinationer av yrke eller bransch och ort per kundtyp enligt fördelningen")
-  .option("--antal <n>", "antal nya segment", "12")
+  .option("--antal <n>", "antal nya segment (bara via API)", "12")
   .option("--lista", "visa befintliga segment i stället för att skapa nya", false)
-  .action(async (o: { antal: string; lista: boolean }) => {
+  .option("--fil <sokvag>", "läs in segment från en JSON-lista [{kundtyp, yrke, ort, sokfras, motivering}] skriven i sessionen")
+  .action(async (o: { antal: string; lista: boolean; fil?: string }) => {
     konfig();
     const d = db();
     if (o.lista) {
       for (const s of allaSegment(d)) console.log(`${String(s.id).padStart(3)}  kundtyp ${s.kundtyp}  ${s.yrke} i ${s.ort}  "${s.sokfras}"  ${s.anvand ? `använt, ${s.traffar} träffar` : "oanvänt"}`);
+      return;
+    }
+    if (o.fil) {
+      const nya = importeraSegment(d, SegmentListaSchema.parse(JSON.parse(fs.readFileSync(o.fil, "utf8"))));
+      for (const s of nya) console.log(`${String(s.id).padStart(3)}  kundtyp ${s.kundtyp}  ${s.yrke} i ${s.ort}  "${s.sokfras}"`);
+      logg.info(`Klart. ${nya.length} nya segment inlästa.`);
       return;
     }
     const nya = await skapaSegment(d, Math.max(1, Number.parseInt(o.antal, 10) || 12));
