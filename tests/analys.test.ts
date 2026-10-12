@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_FYND, tolkaAnalys } from "../src/analyze/analys.js";
+import { KLIPP_FYND, tolkaAnalys } from "../src/analyze/analys.js";
 import { AnalysSchema, VerifieringSchema } from "../src/analyze/schema.js";
 
 const fynd = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -52,16 +52,16 @@ describe("den lätta analysen", () => {
     expect("djup" in a.fynd[0]).toBe(false);
   });
 
-  it("klipper till högst fyra fynd och gör id:n unika", () => {
+  it("behåller högst sex fynd och gör id:n unika", () => {
     const a = tolkaAnalys({
       organisationstyp: "okand",
       organisationsnamn: null,
       profil: { person: { drivs_av_namngiven_person: false, fornamn: null, sakerhet: 0.5, belagg: null }, vad_de_gor: "x", huvudhandling: "y" },
       valskott: false,
-      fynd: [fynd("f1"), fynd("f1"), fynd("f3"), fynd("f4"), fynd("f5")],
+      fynd: [fynd("f1"), fynd("f1"), fynd("f3"), fynd("f4"), fynd("f5"), fynd("f6"), fynd("f7")],
     });
-    expect(a.fynd).toHaveLength(MAX_FYND);
-    expect(a.fynd.map((f) => f.id)).toEqual(["f1", "f1b", "f3", "f4"]);
+    expect(a.fynd).toHaveLength(KLIPP_FYND);
+    expect(a.fynd.map((f) => f.id)).toEqual(["f1", "f1b", "f3", "f4", "f5", "f6"]);
   });
 
   it("kräver profil och fynd", () => {

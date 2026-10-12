@@ -7,8 +7,9 @@ import { bildBlock, lasPrompt, strukturerat } from "./klient.js";
 import { AnalysFordjupadSchema, AnalysSchema, OMRADEN, stadaFynd, type Analys, type AnalysFordjupad } from "./schema.js";
 import { underlagForFordjupning, underlagForModell, type Underlag } from "./underlag.js";
 
-/** Den lätta analysen tar fram tre till fyra fynd. Fler än så klipps. */
+/** Den lätta analysen tar fram tre till fyra fynd. Svar med fler fynd (till exempel äldre fördjupade analyser som tolkas om) behålls upp till sex. */
 export const MAX_FYND = 4;
+export const KLIPP_FYND = 6;
 
 /**
  * Läser prompts/rawaz-perspektiv.md och returnerar det Rawaz har fyllt i.
@@ -53,10 +54,10 @@ export function tolkaAnalys(svar: unknown): Analys {
   return stadaAnalys(AnalysSchema.parse(svar));
 }
 
-/** Efterstädning av ett analyssvar: allvar inom intervallet, städat förslag, unika id:n, högst MAX_FYND fynd. */
+/** Efterstädning av ett analyssvar: allvar inom intervallet, städat förslag, unika id:n, högst KLIPP_FYND fynd. */
 export function stadaAnalys(svar: Analys): Analys {
   const sedda = new Set<string>();
-  svar.fynd = svar.fynd.slice(0, MAX_FYND).map((f, i) => {
+  svar.fynd = svar.fynd.slice(0, KLIPP_FYND).map((f, i) => {
     const s = stadaFynd(f);
     let id = s.id || `f-${String(i + 1).padStart(3, "0")}`;
     while (sedda.has(id)) id = `${id}b`;
