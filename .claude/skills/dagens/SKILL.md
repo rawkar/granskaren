@@ -1,29 +1,35 @@
 ---
 name: dagens
-description: Kör dagens pass i Granskaren utan API, på Rawaz prenumeration. Verktygets kod hämtar, mäter, kontrollerar och skickar; underagenter med tomt sammanhang gör analys och utkast (Opus) samt verifiering och grind (Haiku 4.5). Använd när Rawaz skriver /dagens.
+description: Kör dagens pass i Granskaren utan API, på Rawaz prenumeration. Verktygets kod hämtar, mäter, kontrollerar och sparar; underagenter med tomt sammanhang gör analys och utkast (claude-opus-5-5) samt verifiering och förfilter (claude-haiku-4-5-20251001). Används när Rawaz skriver /dagens, alltid i en ny session.
 ---
 
 # Dagens pass utan API
 
-Du är passledare. Du gör inga modellsteg själv utom webbsökningen i discover. Varje modellsteg görs av en underagent med tomt sammanhang som bara får läsa arbetspaketet och skriva sin resultatfil. Verktygets kod gör allt annat och kontrollerar varje svar mot samma zod-scheman, kodkontroller och grind som API-vägen.
+Du är passledare. Du gör inga modellsteg själv utom webbsökningen i discover. Varje modellsteg görs av en underagent med tomt sammanhang som bara får läsa arbetspaketet och skriva sin resultatfil. Verktygets kod gör allt annat och kontrollerar varje svar mot samma zod-scheman och kodkontroller som alltid.
 
-Alla kommandon körs från projektmappen med `MODELLVAG=session` i miljön, till exempel:
+Tre regler för dig som passledare:
+
+1. Du läser aldrig analys-, verifierings- eller utkastfiler och skriver aldrig ut dem. Du kör in-kommandona och läser bara raden som börjar med `UTFALL`, `MODELL` eller `TOKENS`. Mejlen läser Rawaz själv i granskningskön.
+2. Du felsöker inte mitt i ett pass. Händer något oväntat (ett kommando kraschar, en agent svarar fel två gånger, en modellavvikelse, ett 429) avbryter du passet, kör `pass status`, och rapporterar kort vad som hände och var passet står. Allt läge finns på disk, passet återupptas i en ny session.
+3. Högst två underagenter samtidigt, aldrig fler.
+
+Alla kommandon körs från projektmappen:
 
 ```
-MODELLVAG=session npx tsx src/cli.ts pass status
+npx tsx src/cli.ts pass status
 ```
 
-Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägrar starta. Sätt aldrig nyckeln i miljön under passet.
+Driften går bara via sessionen: TILLAT_API=false i .env gör att API-klienten vägrar starta och att ingen nyckel läses in. Sätt aldrig ANTHROPIC_API_KEY i miljön.
 
 ## 0. Innan du börjar
 
-1. Sessionsgränsen och kvotmätningen. Argumenten till /dagens är `/dagens <session kvar> <vecka kvar> [antal sajter]`, till exempel `/dagens 100 80 2`. Saknas värdena, be Rawaz läsa av `/usage` och säga hur stor andel som är kvar av femtimmarssessionen och av veckan. Spara båda direkt:
+1. Argumenten till /dagens är `/dagens <session kvar> <vecka kvar> [antal sajter]`, till exempel `/dagens 100 80 2`. Saknas värdena, be Rawaz läsa av `/usage` och säga hur stor andel som är kvar av femtimmarssessionen och av veckan. Spara dem direkt:
 
    ```
-   MODELLVAG=session npx tsx src/cli.ts pass kvot --fore <session> --vecka <vecka>
+   npx tsx src/cli.ts pass kvot --fore <session> --vecka <vecka>
    ```
 
-   Kommandot visar snittförbrukningen per sajt från tidigare pass för båda gränserna (data/jamforelse/kvot-logg.csv), hur många sajter som ryms i sessionen med marginal och hur många pass veckan räcker till. Finns ett snitt, använd det talet som `--antal` (eller det antal Rawaz angav om det är lägre). Finns inget snitt ännu, välj efter tabellen, hellre färre sajter än ett pass som avbryts mitt i:
+   Kommandot visar snittförbrukningen per sajt från tidigare pass (data/jamforelse/kvot-logg.csv), hur många sajter som ryms i sessionen med marginal och hur många pass veckan räcker till. Finns ett snitt, använd det talet som `--antal` (eller det antal Rawaz angav om det är lägre). Finns inget snitt ännu, välj efter tabellen, hellre färre sajter än ett pass som avbryts mitt i:
 
    | Kvar av sessionsgränsen | Antal sajter (`--antal`) |
    |---|---|
@@ -32,70 +38,72 @@ Med MODELLVAG=session läses ANTHROPIC_API_KEY aldrig in och API-klienten vägra
    | 20 till 40 procent | 2 |
    | under 20 procent | kör inte, säg när gränsen återställs |
 
-   Mätningen den 9 oktober 2026: ett pass på fem sajter drog 1,3 miljoner tokens i cache-skrivning och 4,6 miljoner i cache-läsning hos underagenterna, alltså ungefär 1,2 miljoner tokens per sajt. Passledarens egna anrop kostar därutöver lika mycket som dess sammanhang är stort gånger antalet anrop, så kör passet i en ny session med litet sammanhang, aldrig i en session som redan har arbetat länge. Se data/jamforelse/2026-10-09-kvot.md.
-2. Kontrollera `.env`: `RUN_PAUSAD=true` (så att den schemalagda API-körningen inte går samma dag) och `SANDLAGE=granska` (så att alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
-3. Kör `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
+2. Kontrollera `.env`: `TILLAT_API=false` och `SANDLAGE=granska` (alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
+3. Kör `npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
 4. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
 
 ## 1. Förbered
 
 ```
-MODELLVAG=session npx tsx src/cli.ts pass forbered --antal 8
+npx tsx src/cli.ts pass forbered --antal <n>
 ```
 
-Hämtar och mäter sajter med status ny eller kvalificerad och skriver ett arbetspaket per sajt i `data/pass/<datum>/<domän>/`. Finns inga sajter kvar, gör discover (avsnitt 3) och förbered igen.
+Hämtar och mäter sajter med status ny eller kvalificerad och skriver ett arbetspaket per sajt i `data/pass/<datum>/<domän>/`. Egenföretagare (kundtyp 1) ligger sist i kön och får högst var tionde plats. Finns inga sajter kvar, gör discover (avsnitt 3) och förbered igen.
 
 ## 2. Per sajt, i den här ordningen
 
-Kör sajterna en i taget och starta högst två underagenter samtidigt. Fem Opus-agenter på en gång slog i sessionsgränsen den 9 oktober 2026 och alla fem avbröts. Mappen är `data/pass/<datum>/<domän>` (domänen med ogiltiga tecken ersatta av understreck, så som `pass status` visar den). Varje underagent startas med Agent-verktyget, med subagent_type enligt nedan, och ett uppdrag som bara anger mappens fullständiga sökväg. Underagenterna har bara verktygen Read och Write.
+Kör sajterna en i taget och starta högst två underagenter samtidigt. Mappen är `data/pass/<datum>/<domän>` (domänen med ogiltiga tecken ersatta av understreck, så som `pass status` visar den). Varje underagent startas med Agent-verktyget, med subagent_type enligt nedan, `run_in_background: false`, och ett uppdrag som bara anger mappens fullständiga sökväg. Underagenterna har bara verktygen Read och Write.
 
-| Steg | Underagent | Skriver | Sedan kör du |
-|---|---|---|---|
-| analys | `granskaren-analys` (Opus) | analys.json | `pass analys-in <domän>` |
-| verifiering | `granskaren-verifiering` (Haiku 4.5) | verifiering.json | `pass verifiering-in <domän>` |
-| utkast | `granskaren-utkast` (Opus) | utkast.json | `pass utkast-in <domän>` |
-| grind | `granskaren-grind` (Haiku 4.5) | grind.json | `pass grind-in <domän>` |
+| Steg | Underagent | Modell | Skriver | Sedan kör du |
+|---|---|---|---|---|
+| analys | `granskaren-analys` | claude-opus-5-5 | analys.json | `pass analys-in <domän>` |
+| verifiering | `granskaren-verifiering` | claude-haiku-4-5-20251001 | verifiering.json | `pass verifiering-in <domän>` |
+| utkast | `granskaren-utkast` | claude-opus-5-5 | utkast.json | `pass utkast-in <domän>` |
+| grind | `granskaren-grind` (bara när SANDLAGE=auto) | claude-haiku-4-5-20251001 | grind.json | `pass grind-in <domän>` |
 
-Verifieringen går efter analysen och utkastet efter verifieringen, eftersom mejlet bara får bygga på bekräftade fynd. Kodkontrollerna körs av `analys-in` före verifieringen och av `utkast-in` före grindens modell.
+Verifieringen går efter analysen och utkastet efter verifieringen, eftersom mejlet bara får bygga på bekräftade fynd. Kodkontrollerna körs av `analys-in` före verifieringen och av `utkast-in` före sparandet. I läget granska avslutar `utkast-in` sajten direkt när kodkontrollerna godkänner utkastet (`nasta=klar`), eftersom Rawaz läser varje mejl; modellgrinden körs bara i läget auto.
 
-Varje in-kommando skriver en rad som börjar med `UTFALL`:
+Efter varje underagent gör du två saker med Agent-verktygets svar:
 
-- `UTFALL ok <domän> nasta=<steg>`: gå till det steget. `nasta=verifiering` betyder att verifieringspaketet är skrivet; `nasta=utkast` att utkastpaketet är skrivet; `nasta=grind` att grindpaketet är skrivet; `nasta=klar`, `stoppad` eller `granskningsko` att sajten är färdig. Om `analys-in` säger `nasta=utkast` behövde inget fynd modellens verifiering.
+1. **Modellkontroll efter den första agenten i varje steg.** Svaret innehåller agentens id. Kör `npx tsx src/cli.ts pass modellkontroll --steg <steg> --agent <id>`. Står det `MODELL avvikelse` avbryter du passet omedelbart: starta inga fler agenter, kör `pass status`, och rapportera raden till Rawaz ordagrant. Agentdefinitionerna anger fullständiga modellnamn, så en avvikelse betyder att sessionen inte följer dem och måste startas om.
+2. **Tokens.** Svaret innehåller `subagent_tokens`. Kör `npx tsx src/cli.ts pass tokens <domän> --steg <steg> --antal <tal>`. Det ger tokens per sajt och steg i rapporten efter passet.
+
+Läs in-kommandots utfallsrad:
+
+- `UTFALL ok <domän> nasta=<steg>`: gå till det steget. `nasta=verifiering` betyder att verifieringspaketet är skrivet; `nasta=utkast` att utkastpaketet är skrivet; `nasta=grind` att grindpaketet är skrivet (bara i läget auto); `nasta=klar`, `stoppad` eller `granskningsko` att sajten är färdig. Om `analys-in` säger `nasta=utkast` behövde inget fynd modellens verifiering.
 - `UTFALL nytt_forsok <domän>` (avslutningskod 2): starta samma underagent igen på samma mapp. Den läser felfilen (`analys-fel.txt`, `verifiering-fel.txt`, `utkast-fel.txt` eller `grind-fel.txt`) och gör ett nytt försök. Högst två försök per steg sköts av koden: efter det andra misslyckade försöket går sajten till granskningskön eller stoppas, och kommandot säger det.
-- `UTFALL avbrutet <domän>` (avslutningskod 3): sajten är lagd i granskningskön. Gå vidare till nästa sajt.
+- `UTFALL avbrutet <domän>` (avslutningskod 3): sajten är färdig med ett hinder (till exempel färre än två bekräftade fynd eller sajten bedömd som välskött). Gå vidare till nästa sajt.
 
-Kontrollera inte underagenternas svar själv och rätta dem inte. Koden gör kontrollen. Läs inte arbetspaketens innehåll in i ditt eget sammanhang mer än nödvändigt.
+### Sajterna från den 12 oktober 2026
 
-## 3. Discover, bara när kön är tom
+lovisualisera.se, inredningsdesigneruppsala.se, torshallagk.se och ifkeskilstuna.com analyserades den 12 oktober med den gamla verifieringen. De behöver inte analyseras om. I nästa pass körs för var och en `npx tsx src/cli.ts pass analys-in <domän> --datum 2026-10-12`: kommandot tolkar den sparade analysen med det nya schemat, kör kodkontrollerna och skriver nya verifieringspaket med den nya verifieringsprompten. Kör sedan verifieringsagenten på `data/pass/2026-10-12/<domän>` och fortsätt med `--datum 2026-10-12` på alla in-kommandon för de fyra sajterna, tills de är klara. Gör det före dagens nya sajter.
 
-Discover görs i sessionen med din egen webbsökning, inte av en underagent.
+## 3. Discover, när kön är tom
 
-1. Välj ett oanvänt segment: `MODELLVAG=session npx tsx src/cli.ts segment --lista`. Finns inget oanvänt, be Rawaz köra `segment` via API vid ett annat tillfälle (segmentframtagning ingår inte i passet).
-2. `MODELLVAG=session npx tsx src/cli.ts pass discover-paket --segment <id> --antal 10 --sokningar 8`. Läs discover-system.md och discover-uppgift.md i mappen som skrivs ut. Följ dem: bara organisationernas egna sajter, inga kända domäner.
-3. Sök med WebSearch på svenska, alltid med orten i frågan, och gör flera smala sökningar hellre än en bred: yrkesordet med orten, med grannkommuner, med ord som "hemsida", "kontakt", "boka", "medlem", "portfolio", samt yrkesvarianter. Högst så många sökningar som paketet anger. En domän får bara tas med om den står i ett sökresultat eller på en sida du har hämtat. Gissa aldrig en adress utifrån ett namn.
-4. Katalogvägen: sök också efter medlemslistor, register och förteckningar för segmentet (yrkesförbund, kör- och föreningsregister, kommunens föreningsregister, branschorganisationer). För varje sådan sida, kör `pass discover-katalog --segment <id> --url <adress> --varfor "medlem i ..."`. Koden hämtar sidan och lägger de webbplatser den länkar till i traffar.json med hittad_via satt till katalogen.
+Discover görs i sessionen: du söker själv med WebSearch, koden hämtar och kontrollerar kandidaterna, och en underagent förfiltrerar dem.
+
+1. Välj ett oanvänt segment: `npx tsx src/cli.ts segment --lista`. Nio av tio platser går till kundtyp 2 och 3; välj kundtyp 1 bara om ett pass redan har nio sajter av kundtyp 2 och 3. Finns inget oanvänt segment skriver du nya segment i sessionen som en JSON-lista `[{kundtyp, yrke, ort, sokfras, motivering}]` enligt kundprofilen och läser in dem med `npx tsx src/cli.ts segment --fil <sökväg>`.
+2. `npx tsx src/cli.ts pass discover-paket --segment <id> --antal 10 --sokningar 8`. Läs discover-system.md och discover-uppgift.md i mappen som skrivs ut. Följ dem: bara organisationernas egna sajter, inga kända domäner.
+3. Sök med WebSearch på svenska, alltid med orten i frågan, och gör flera smala sökningar hellre än en bred: yrkesordet med orten, med grannkommuner, med ord som "hemsida", "kontakt", "boka", "medlem", "kansli", samt yrkesvarianter. Högst så många sökningar som paketet anger. En domän får bara tas med om den står i ett sökresultat eller på en sida du har hämtat. Gissa aldrig en adress utifrån ett namn.
+4. Katalogvägen: sök också efter medlemslistor, register och förteckningar för segmentet (branschorganisationer, föreningsregister, kommunens föreningsregister, stiftelseregister). För varje sådan sida, kör `pass discover-katalog --segment <id> --url <adress> --varfor "medlem i ..."`. Koden hämtar sidan och lägger de webbplatser den länkar till i traffar.json med hittad_via satt till katalogen.
 5. Skriv sökträffarna som en JSON-lista `[{"namn": ..., "url": ..., "varfor": ..., "hittad_via": ...}]` till `traffar.json` i mappen (lägg till i listan om katalogvägen redan har skrivit dit). `hittad_via` är sökresultatets adress när resultatet pekar på sajten själv, annars den sida där du såg länken.
 6. `pass discover-in --segment <id>`. Koden avvisar domäner som inte kommer från ett sökresultat eller en hämtad sida, sparar resten i soktraffar, hämtar varje kandidat och kör förfiltrets kodregler. Kandidater som klarar koden får filer i undermappen `forfilter/`.
-7. Starta `granskaren-forfilter` (Haiku 4.5) på mappen `forfilter/`. Kör sedan `pass forfilter-in --segment <id>`. Godkända blir prospekt med status ny.
+7. Starta `granskaren-forfilter` (claude-haiku-4-5-20251001) på mappen `forfilter/`. Gör modellkontrollen (`--steg forfilter`). Kör sedan `pass forfilter-in --segment <id>`. Godkända blir prospekt med status ny. Tecken på anställda (kansli, personalsida, namngivna roller, växelnummer, funktionsadresser) är pluspoäng; likhet med förebilderna väljer inte bort någon.
 8. Kör `pass forbered` igen för de nya prospekten och fortsätt med avsnitt 2.
 
-## 4. Skicka
+## 4. Utskick
 
-```
-MODELLVAG=session npx tsx src/cli.ts send
-```
-
-Samma utskick som i dag: köade mejl inom sändfönstret och dagens tak, med slumpad paus mellan mejlen. Mejl i granskningskön skickas inte förrän Rawaz godkänt dem med `review`. Med `SANDLAGE=granska` hamnar alla mejl i granskningskön, så `send` har då inget att skicka förrän Rawaz har gått igenom kön.
+Inget skickas i passet. Med `SANDLAGE=granska` hamnar alla mejl i granskningskön, och `SAND_PAUSAD=true` håller kön stängd tills Rawaz har läst mejlen med `granskaren review` och själv släpper dem.
 
 ## 5. Efter passet
 
-1. `pass status` och sammanfatta: per sajt antal fynd, bekräftade, utfall i grinden och antal försök.
-2. `MODELLVAG=session npx tsx src/cli.ts pass api-kontroll --sedan <numret från steg 0>`. Det ska stå 0 API-anrop. Visa raden för Rawaz.
-3. Be Rawaz läsa av `/usage` igen, båda värdena, och kör `MODELLVAG=session npx tsx src/cli.ts pass kvot --efter <session> --vecka <vecka> --kommentar "<plan, antal agenter samtidigt>"`. Kommandot loggar förbrukningen per sajt för sessionen och veckan i data/jamforelse/kvot-logg.csv och visar snitten över alla pass, hur många sajter som ryms i en session och hur många pass veckan räcker till. Visa raden för Rawaz. Snittet styr antalet sajter i nästa pass (steg 0).
+1. `pass status` och visa raderna: per sajt steg, försök och utfall, samt tokenstabellen (antal sajter, antal mejl, tokens per sajt uppdelat på analys, verifiering och utkast).
+2. `npx tsx src/cli.ts pass api-kontroll --sedan <numret från steg 0>`. Det ska stå 0 API-anrop. Visa raden för Rawaz.
+3. Be Rawaz läsa av `/usage` igen, båda värdena, och kör `npx tsx src/cli.ts pass kvot --efter <session> --vecka <vecka> --kommentar "<plan, antal agenter samtidigt>"`. Kommandot loggar förbrukningen per sajt för sessionen och veckan i data/jamforelse/kvot-logg.csv och visar snitten över alla pass, hur många sajter som ryms i en session och hur många pass veckan räcker till. Visa raden för Rawaz. Snittet styr antalet sajter i nästa pass (steg 0).
 
 ## Mätpass på två sajter
 
-Första passet på en ny plan eller efter en större ändring körs som mätpass: `/dagens <session kvar> <vecka kvar> 2` i en ny session utan annat arbete. Allt annat är som vanligt (SANDLAGE=granska, alla mejl till granskningskön, RUN_PAUSAD=true, högst två agenter samtidigt). Efter passet ger `pass kvot --efter` förbrukningen per sajt, och det talet används för att sätta antalet sajter i kommande pass. Mätpasset den 12 oktober 2026 körs av Rawaz själv i en ny session.
+Första passet på en ny plan eller efter en större ändring körs som mätpass: `/dagens <session kvar> <vecka kvar> 2` i en ny session utan annat arbete. Allt annat är som vanligt. Efter passet ger `pass kvot --efter` förbrukningen per sajt, och det talet används för att sätta antalet sajter i kommande pass.
 
 ## Om sessionsgränsen slår till
 
@@ -103,4 +111,8 @@ En underagent som avbryts med "session limit" (429) har inte skrivit sin resulta
 
 ## Om sessionen stängs mitt i
 
-Allt läge finns på disk och i databasen: arbetspaketen med statusfiler, fynd och verifiering i databasen, mejl i kön med status koad. Starta en ny session, skriv /dagens igen och börja på steg 0. `pass status` visar var varje sajt står och passet fortsätter därifrån. Ett steg som avbröts innan dess in-kommando kördes görs om från det steget. Utskicket kan inte dubbleras: varje mejl byter status till skickad när det går, `send` tar bara mejl med status koad, och databasen tillåter bara ett förstamejl per domän.
+Allt läge finns på disk och i databasen: arbetspaketen med statusfiler, fynd och verifiering i databasen, mejl i granskningskön. Starta en ny session, skriv /dagens igen och börja på steg 0. `pass status` visar var varje sajt står och passet fortsätter därifrån. Ett steg som avbröts innan dess in-kommando kördes görs om från det steget. Utskicket kan inte dubbleras: databasen tillåter bara ett förstamejl per domän.
+
+## Fördjupad analys på begäran
+
+När en organisation har svarat kan Rawaz be om den fullständiga analysen: `npx tsx src/cli.ts fordjupa <domän>` skriver ett arbetspaket i `data/fordjupning/<domän>/`, du startar `granskaren-analys` på den mappen, och `npx tsx src/cli.ts fordjupa-in <domän>` skriver rapporten `data/rapporter/<domän>-fordjupning.md`. Det ingår inte i ett vanligt pass.
