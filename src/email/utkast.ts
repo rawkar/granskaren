@@ -2,20 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { lasPrompt, strukturerat } from "../analyze/klient.js";
-import type { Huvudinsikt, Profil } from "../analyze/schema.js";
+import type { Profil } from "../analyze/schema.js";
 import { konfig, PROMPT_DIR } from "../config.js";
 import type { Db } from "../db/index.js";
-import {
-  braForProspekt,
-  fyndForProspekt,
-  harFattMejl,
-  loggaHandelse,
-  sattStatus,
-  sidorForProspekt,
-  type FyndRad,
-  type Prospekt,
-} from "../db/fragor.js";
-import { rapportSokvag, underlagSokvag } from "../report/rapport.js";
+import { braForProspekt, fyndForProspekt, harFattMejl, loggaHandelse, sattStatus, sidorForProspekt, type FyndRad, type Prospekt } from "../db/fragor.js";
+import { profilText, rapportSokvag, underlagSokvag } from "../report/rapport.js";
 import type { Underlag } from "../analyze/underlag.js";
 import { dataMapp, filnamnSaker, lasJson } from "../util/fil.js";
 import { logg } from "../util/logg.js";
@@ -46,20 +37,21 @@ export function signatur(): string {
 }
 
 export function avslutsrad(tilltal: Tilltal): string {
-  return tilltal === "du"
-    ? "Vill du inte att jag hör av mig igen räcker det att du svarar det."
-    : "Vill ni inte att jag hör av mig igen räcker det att ni svarar det.";
+  return tilltal === "du" ? "Vill du inte att jag hör av mig igen räcker det att du svarar det." : "Vill ni inte att jag hör av mig igen räcker det att ni svarar det.";
 }
 
 export function sattIhop(brodtext: string, tilltal: Tilltal = "ni"): string {
   return `${brodtext.trim()}\n${signatur()}\n\n${avslutsrad(tilltal)}\n`;
 }
 
+/** Profilen så som den ligger i databasen: den lätta analysens text eller äldre analysers objekt med varde. */
+export type SparadProfil = { person?: Profil["person"]; vad_de_gor?: unknown; huvudhandling?: unknown } & Record<string, unknown>;
+
 /**
  * Tilltal och förnamn. Kundtypen styr när den finns: kundtyp 1 får förnamn och du, övriga ni.
  * Saknas kundtyp avgör profilen: du bara när personen är namngiven med rimlig säkerhet.
  */
-export function tilltalFor(profil: Profil | null, kundtyp: number | null = null): { tilltal: Tilltal; fornamn: string | null } {
+export function tilltalFor(profil: SparadProfil | null, kundtyp: number | null = null): { tilltal: Tilltal; fornamn: string | null } {
   const p = profil?.person;
   const fornamn = p?.fornamn ? p.fornamn.trim().split(/\s+/)[0] : null;
   if (kundtyp === 1) return { tilltal: "du", fornamn };
@@ -68,22 +60,19 @@ export function tilltalFor(profil: Profil | null, kundtyp: number | null = null)
   return { tilltal: "ni", fornamn: null };
 }
 
-/** Profilpunkter med hög säkerhet och utan gissning, det enda som får bli påståenden i mejlet. */
-function sakraProfilpunkter(profil: Profil | null): Record<string, string> {
+/** Profilpunkterna som får bli påståenden i mejlet: vad de gör och vilken handling sajten vill leda till. */
+export function sakraProfilpunkter(profil: SparadProfil | null): Record<string, string> {
   if (!profil) return {};
   const ut: Record<string, string> = {};
   for (const [k, v] of Object.entries(profil)) {
     if (k === "borja_med" || k === "person") continue;
-    const p = v as { varde: string; sakerhet: number; gissning: boolean };
-    if (p && typeof p.varde === "string" && !p.gissning && p.sakerhet >= 0.7) ut[k] = p.varde;
+    const text = profilText(v);
+    if (text) ut[k] = text;
   }
   return ut;
 }
 
-/**
- * Tillägg till mejlprompten när .env anger ett ordmål (MEJL_ORDMAL) eller en annan övre gräns än promptens 220.
- * Tom sträng när inget avviker.
- */
+/** Tillägg till mejlprompten när .env anger ett annat ordmål eller en annan övre gräns än promptens. Tom sträng när inget avviker. */
 export function langdText(ordmal: number, maxOrd: number): string {
   if (ordmal <= 0 && maxOrd === MAX_ORD) return "";
   const mal = ordmal > 0 ? ordmal : Math.round((MIN_ORD + maxOrd) / 2);
@@ -152,7 +141,7 @@ export function medFlerFynd(brodtext: string, mening: string | null): string {
   return delar.join("\n\n");
 }
 
-/** Systemprompten för mejlet: prompts/mejl.md med tilläggen för längd och fler fynd. Samma text i API-vägen och i passet. */
+/** Systemprompten för mejlet: prompts/mejl.md med tilläggen för längd och fler fynd. Samma text i passet och i API-vägen. */
 export function utkastSystem(flerFynd: number | null): string {
   const k = konfig();
   const forbjudna = lasForbjudnaFraser();
@@ -160,12 +149,11 @@ export function utkastSystem(flerFynd: number | null): string {
   return lasPrompt("mejl") + fraser + langdText(k.MEJL_ORDMAL, k.MEJL_MAX_ORD) + flerFyndText(flerFynd);
 }
 
-/** Uppgifterna modellen får, som JSON-objekt. */
+/** Uppgifterna modellen får, som JSON-objekt. Huvudfyndet har roll huvudpoäng, påståenden i galler_inte får inte användas. */
 export function utkastUppgifter(
   p: Prospekt,
   fynd: FyndRad[],
-  huvudinsikt: Huvudinsikt,
-  profil: Profil | null,
+  profil: SparadProfil | null,
   tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
   flerFynd: number | null = null,
@@ -174,28 +162,29 @@ export function utkastUppgifter(
   const k = konfig();
   const inledning = `Första stycket: programmet skriver "${PRESENTATION}". Du skriver en enda mening till i det stycket: "Jag har gått igenom ${tilltal.tilltal === "du" ? "din" : "er"} webbplats och har några förslag som jag tror kan ge ${tilltal.tilltal === "du" ? "dig" : "er"} fler ..." med ett vanligt ord för det verksamheten vill ha. Nämn aldrig verktyg och beskriv inte verksamheten.`;
   const huvud = huvudfynd ?? fynd[0]?.fynd_id ?? null;
+  const gallerInte = fynd.filter((f) => f.galler_inte).map((f) => `${f.fynd_id}: ${f.galler_inte}`);
   return {
     organisation: { namn: p.namn, doman: p.doman, organisationstyp: p.organisationstyp, bransch: p.bransch, ort: p.ort },
     tilltal: tilltal.tilltal,
     fornamn: tilltal.fornamn,
     profil: sakraProfilpunkter(profil),
-    huvudinsikt: huvudinsikt.text,
     avsandare: { namn: k.AVSANDARE_NAMN, sajt: "rkkommunikation.se", bokningslank: k.BOKNINGSLANK || null },
     inledning,
     huvudpoang: huvud ? `Mejlet öppnar med fyndet ${huvud}, det med roll huvudpoäng. Andra stycket handlar bara om det fyndet.` : null,
+    ...(gallerInte.length ? { far_inte_anvandas: `Verifieringen underkände de här påståendena. De får inte förekomma i mejlet, inte heller omskrivna, och inga siffror eller namn ur dem: ${gallerInte.join(" | ")}` } : {}),
+    exempel: fynd.some((f) => f.forslag_konkret) ? "Ett av fynden har forslag_konkret. Återge det exakt på en egen rad som exempel." : "Inget av fynden har ett konkret förslag. Skriv inget exempel på egen rad och hitta inte på något.",
     fynd: fynd.map((f) => ({
       fynd_id: f.fynd_id,
       roll: f.fynd_id === huvud ? "huvudpoäng" : "stöd",
       omrade: f.omrade,
-      djup: f.djup,
+      allvar: f.allvar,
       rubrik: f.rubrik,
       observation: f.observation,
-      insikt: f.insikt,
       effekt: f.effekt,
-      atgard: f.atgard,
       forslag_konkret: f.forslag_konkret,
       sida: f.belagg_url,
       belagg: f.belagg_varde,
+      ...(f.galler_inte ? { galler_inte: f.galler_inte } : {}),
     })),
     ...(k.MEJL_ORDMAL > 0 ? { ordmal: k.MEJL_ORDMAL } : {}),
     ...(flerFynd !== null ? { fler_bekraftade_fynd_utanfor_mejlet: flerFynd } : {}),
@@ -208,13 +197,12 @@ export function utkastText(uppgifter: Record<string, unknown>): string {
   return `Uppgifter för mejlet i JSON:\n\n${JSON.stringify(uppgifter, null, 1)}`;
 }
 
-/** Skriver brödtexten med modellen kring huvudinsikten och de valda fynden. */
+/** Skriver brödtexten med modellen via API. Används inte i driften. */
 export async function skrivUtkast(
   d: Db,
   p: Prospekt,
   fynd: FyndRad[],
-  huvudinsikt: Huvudinsikt,
-  profil: Profil | null,
+  profil: SparadProfil | null,
   tilltal: { tilltal: Tilltal; fornamn: string | null },
   tidigareFel: string[] = [],
   flerFynd: number | null = null,
@@ -227,7 +215,7 @@ export async function skrivUtkast(
     steg: "utkast",
     modell: k.MODEL_ANALYS,
     system: utkastSystem(flerFynd),
-    innehall: [{ type: "text", text: utkastText(utkastUppgifter(p, fynd, huvudinsikt, profil, tilltal, tidigareFel, flerFynd, huvudfynd)) }],
+    innehall: [{ type: "text", text: utkastText(utkastUppgifter(p, fynd, profil, tilltal, tidigareFel, flerFynd, huvudfynd)) }],
     schema: UtkastSchema,
     maxTokens: 4000,
     effort: "medium",
@@ -245,8 +233,7 @@ export interface DraftAlternativ {
 export interface UtkastForberett {
   typ: "klar";
   valda: FyndRad[];
-  huvudinsikt: Huvudinsikt;
-  profil: Profil | null;
+  profil: SparadProfil | null;
   tilltal: { tilltal: Tilltal; fornamn: string | null };
   amne: string;
   mottagare: string;
@@ -255,7 +242,7 @@ export interface UtkastForberett {
   flerFynd: number | null;
   /** fynd_id för huvudfyndet, det mejlet öppnar med. Står först i valda. */
   huvudfynd: string;
-  grindAlt: { testlage: boolean; huvudinsikt: string; profil: string; tilltal: Tilltal; flerFynd: number | null; kallor: Faktakallor; huvudfynd: string };
+  grindAlt: { testlage: boolean; profil: string; tilltal: Tilltal; flerFynd: number | null; kallor: Faktakallor; huvudfynd: string; gallerInte: (string | null)[] };
 }
 
 export type UtkastHinder = { typ: "redan_mejl" } | { typ: "inget_mejl"; orsak: string } | { typ: "ingen_adress" };
@@ -268,12 +255,11 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   const k = konfig();
   if (!alt.igen && harFattMejl(d, p.id)) return { typ: "redan_mejl" };
   const fynd = fyndForProspekt(d, p.id, true);
-  const huvudinsikt = p.huvudinsikt ? (JSON.parse(p.huvudinsikt) as Huvudinsikt) : null;
-  const profil = p.profil ? (JSON.parse(p.profil) as Profil) : null;
-  const val = valjFynd(fynd, huvudinsikt);
-  if (val.orsak || !huvudinsikt) return { typ: "inget_mejl", orsak: val.orsak ?? "ingen huvudinsikt" };
+  const profil = p.profil ? (JSON.parse(p.profil) as SparadProfil) : null;
+  const val = valjFynd(fynd);
+  if (val.orsak || !val.huvud) return { typ: "inget_mejl", orsak: val.orsak ?? "inget huvudfynd" };
   const valda = val.fynd;
-  const huvudfynd = (val.huvud ?? valda[0]).fynd_id;
+  const huvudfynd = val.huvud.fynd_id;
   const bra = braForProspekt(d, p.id);
 
   // Kontakter
@@ -294,17 +280,16 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   const amne = byggAmne(k.AMNESMALL, p.doman, p.namn);
   logg.info(`   mottagare: ${mottagare}${alt.testTill ? " (testläge)" : ` (${kontakt?.typ}, från ${kontakt?.kallsida})`}`);
   logg.info(`   tilltal: ${tilltal.tilltal}${tilltal.fornamn ? ` (${tilltal.fornamn})` : ""}, ämne: ${amne}`);
-  logg.info(`   huvudinsikt: ${huvudinsikt.text}`);
-  logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} djup ${f.djup}`).join(", ")}, huvudpoäng ${huvudfynd}`);
+  logg.info(`   fynd: ${valda.map((f) => `${f.fynd_id} ${f.omrade} allvar ${f.allvar}`).join(", ")}, huvudpoäng ${huvudfynd}`);
 
-  // Bekräftade fynd som inte används i mejlet, för meningen före erbjudandet (MEJL_FLER_FYND)
+  // Bekräftade fynd som inte används i mejlet, för den fasta meningen före erbjudandet (MEJL_FLER_FYND)
   const flerFynd = k.MEJL_FLER_FYND ? fynd.filter((f) => !valda.includes(f)).length : null;
-  // Källor för faktaspårningen: alla bekräftade fynd, profilpunkter med belägg och de kodräknade måtten
+  // Källor för faktaspårningen: alla bekräftade fynd, profilpunkter och de kodräknade måtten
   const underlagFil = underlagSokvag(p.doman);
   const underlag = fs.existsSync(underlagFil) ? lasJson<Underlag>(underlagFil) : null;
-  const kallor = byggFaktakallor(p, fynd, profil, underlag);
-  const grindAlt = { testlage: !!alt.testTill || !!alt.igen, huvudinsikt: huvudinsikt.text, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor, huvudfynd };
-  return { typ: "klar", valda, huvudinsikt, profil, tilltal, amne, mottagare, bra, flerFynd, huvudfynd, grindAlt };
+  const kallor = byggFaktakallor(p, fynd, profil as Profil | null, underlag);
+  const grindAlt = { testlage: !!alt.testTill || !!alt.igen, profil: JSON.stringify(sakraProfilpunkter(profil)), tilltal: tilltal.tilltal, flerFynd, kallor, huvudfynd, gallerInte: valda.map((f) => f.galler_inte) };
+  return { typ: "klar", valda, profil, tilltal, amne, mottagare, bra, flerFynd, huvudfynd, grindAlt };
 }
 
 /**
@@ -336,9 +321,15 @@ export function sparaUtkastResultat(d: Db, p: Prospekt, f: UtkastForberett, brod
   const text = sattIhop(medFler, f.tilltal.tilltal);
   const status = grind.utfall === "stoppad" ? "utkast" : grind.utfall;
   d.prepare("DELETE FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status IN ('utkast', 'i_granskning')").run(p.id);
-  d.prepare(
-    "INSERT INTO mejl (prospekt_id, typ, mottagare, amne, text, anvanda_fynd, sakerhet, status) VALUES (?, 'forsta', ?, ?, ?, ?, ?, ?)",
-  ).run(p.id, f.mottagare, f.amne, text, JSON.stringify(f.valda.map((x) => x.fynd_id)), grind.sakerhet, status);
+  d.prepare("INSERT INTO mejl (prospekt_id, typ, mottagare, amne, text, anvanda_fynd, sakerhet, status) VALUES (?, 'forsta', ?, ?, ?, ?, ?, ?)").run(
+    p.id,
+    f.mottagare,
+    f.amne,
+    text,
+    JSON.stringify(f.valda.map((x) => x.fynd_id)),
+    grind.sakerhet,
+    status,
+  );
   sattStatus(d, p.id, status === "utkast" ? "utkast" : status);
   loggaHandelse(d, p.id, "utkast_skapat", { status, fel: grind.fel, varningar: grind.varningar, sakerhet: grind.sakerhet, tilltal: f.tilltal.tilltal });
 
@@ -349,7 +340,7 @@ export function sparaUtkastResultat(d: Db, p: Prospekt, f: UtkastForberett, brod
   return { amne: f.amne, brodtext: medFler, text, mottagare: f.mottagare, fynd: f.valda, grind };
 }
 
-/** Hela utkaststeget för ett granskat prospekt: kontakter, val av fynd, utkast, kvalitetsgrind, sparande. */
+/** Hela utkaststeget via API för ett granskat prospekt. Används inte i driften. */
 export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): Promise<Utkast | null> {
   logg.info(`Utkast för ${p.doman} (#${p.id})`);
   const f = forberedUtkast(d, p, alt);
@@ -358,11 +349,11 @@ export async function skapaUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {})
     return null;
   }
   const forsok = alt.forsok ?? 2;
-  let utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, [], f.flerFynd, f.huvudfynd)).brodtext);
+  let utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.profil, f.tilltal, [], f.flerFynd, f.huvudfynd)).brodtext);
   let grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, { ...f.grindAlt, extraFel: utkast.fel });
   for (let i = 1; i < forsok && !grind.godkand; i++) {
     logg.info(`   grinden stoppade utkastet (${grind.fel.join("; ")}), nytt försök`);
-    utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.huvudinsikt, f.profil, f.tilltal, grind.fel, f.flerFynd, f.huvudfynd)).brodtext);
+    utkast = sammansattBrodtext((await skrivUtkast(d, p, f.valda, f.profil, f.tilltal, grind.fel, f.flerFynd, f.huvudfynd)).brodtext);
     grind = await kvalitetsgrind(d, p, { amne: f.amne, brodtext: utkast.brodtext }, f.valda, f.bra, f.mottagare, { ...f.grindAlt, extraFel: utkast.fel });
   }
   return sparaUtkastResultat(d, p, f, utkast.brodtext, grind);

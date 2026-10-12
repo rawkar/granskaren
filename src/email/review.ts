@@ -24,7 +24,7 @@ interface MejlRad {
 /** Går igenom granskningskön, ett utkast i taget. Godkänn, redigera eller kasta. */
 export async function review(d: Db): Promise<void> {
   const ko = d.prepare("SELECT * FROM mejl WHERE status IN ('i_granskning', 'utkast') ORDER BY id").all() as MejlRad[];
-  // Sajter i kön utan utkast: ingen huvudinsikt eller inget fynd med djup 3. Rawaz avgör själv utifrån rapporten.
+  // Sajter i kön utan utkast: färre än två bekräftade fynd eller bedömd som välskött. Rawaz avgör själv utifrån rapporten.
   const utanUtkast = d
     .prepare(
       `SELECT p.id, p.doman, p.namn, (SELECT detaljer FROM handelser h WHERE h.prospekt_id = p.id AND h.typ = 'utkast_hoppat' ORDER BY h.id DESC LIMIT 1) AS orsak
@@ -63,10 +63,10 @@ export async function review(d: Db): Promise<void> {
       console.log(`Ämne: ${m.amne}\n`);
       console.log(m.text);
       console.log("-".repeat(78));
-      if (p.huvudinsikt) console.log(`Huvudinsikt: ${(JSON.parse(p.huvudinsikt) as { text: string }).text}`);
+
       console.log("Fynd som mejlet bygger på:");
       for (const f of fynd) {
-        console.log(`  [${f.omrade}, djup ${f.djup}] ${f.rubrik}`);
+        console.log(`  [${f.omrade}, allvar ${f.allvar}] ${f.rubrik}${f.galler_inte ? ` (gäller inte: ${f.galler_inte})` : ""}`);
         console.log(`      ${f.observation}`);
         console.log(`      Belägg: ${f.belagg_typ} ${f.belagg_url}  ${f.belagg_varde}`);
       }

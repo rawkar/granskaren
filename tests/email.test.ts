@@ -6,13 +6,13 @@ import { flerFyndText, langdText } from "../src/email/utkast.js";
 
 describe("tillägg till mejlprompten", () => {
   it("är tomma när inställningarna är standard", () => {
-    expect(langdText(0, 220)).toBe("");
+    expect(langdText(0, 190)).toBe("");
     expect(flerFyndText(null)).toBe("");
   });
   it("anger ordmål och gräns", () => {
-    expect(langdText(190, 210)).toContain("Sikta på 190 ord");
-    expect(langdText(190, 210)).toContain("150 till 210");
-    expect(langdText(0, 210)).toContain("Sikta på 180 ord");
+    expect(langdText(150, 190)).toContain("Sikta på 150 ord");
+    expect(langdText(150, 190)).toContain("110 till 190");
+    expect(langdText(0, 210)).toContain("Sikta på 160 ord");
   });
   it("säger att programmet skriver meningen om fler fynd när inställningen är på", () => {
     expect(flerFyndText(2)).toContain("programmet självt");
@@ -68,48 +68,36 @@ function fynd(delar: Partial<FyndRad>): FyndRad {
     belagg_url: "https://exempel.se/", belagg_typ: "saknat_element", belagg_varde: "h1", effekt: "e", atgard: "a",
     allvar: 2, sakerhet: 0.9, latt_att_forklara: 2, verifierad: 1, verifieringsmetod: "kod", verifieringsnot: null, skapad: "",
     djup: 2, insikt: "i", rotorsak: null, forslag_konkret: null, insats: "liten", kopplar_till_syfte: 1,
-    belagg2_url: null, belagg2_typ: null, belagg2_varde: null,
+    belagg2_url: null, belagg2_typ: null, belagg2_varde: null, galler_inte: null,
     ...delar,
   };
 }
 
 describe("val av fynd", () => {
-  const hi = { text: "Huvudinsikt", fynd_ids: ["djup3", "titel"] };
-
-  it("ger inget mejl utan huvudinsikt eller utan fynd med djup 3", () => {
-    expect(valjFynd([fynd({ fynd_id: "djup3", djup: 3 }), fynd({ fynd_id: "titel", djup: 1 })], null).orsak).toBe("ingen huvudinsikt");
-    expect(valjFynd([fynd({ fynd_id: "djup3", djup: 2 }), fynd({ fynd_id: "titel", djup: 1 })], hi).orsak).toBe("inget bekräftat fynd med djup 3");
+  it("ger inget mejl med färre än två bekräftade fynd", () => {
+    expect(valjFynd([fynd({ fynd_id: "a" }), fynd({ fynd_id: "b", verifierad: 0 })]).orsak).toBe("bara 1 bekräftat fynd, minst två krävs");
+    expect(valjFynd([]).orsak).toBe("bara 0 bekräftat fynd, minst två krävs");
   });
-  it("tar aldrig med obekräftade fynd eller fynd utanför syftet", () => {
-    const v = valjFynd(
-      [
-        fynd({ fynd_id: "djup3", djup: 3, verifierad: 0, forslag_konkret: "x" }),
-        fynd({ fynd_id: "titel", djup: 1, forslag_konkret: "Ny titel" }),
-        fynd({ fynd_id: "annat", djup: 3, kopplar_till_syfte: 0 }),
-      ],
-      hi,
-    );
-    expect(v.fynd).toEqual([]);
-    expect(v.orsak).toBe("inget bekräftat fynd med djup 3");
-  });
-  it("väljer djup 3 som stöder huvudinsikten, högst ett djup 1, och ett med konkret förslag", () => {
-    const v = valjFynd(
-      [
-        fynd({ fynd_id: "titel", djup: 1, forslag_konkret: "Grafisk identitet för företag i Västerås", belagg_url: "https://exempel.se/" }),
-        fynd({ fynd_id: "titel2", djup: 1, omrade: "D", belagg_url: "https://exempel.se/om" }),
-        fynd({ fynd_id: "djup3", djup: 3, omrade: "A", tjansteomrade: "strategi", belagg_url: "https://exempel.se/" }),
-        fynd({ fynd_id: "formular", djup: 2, omrade: "H", belagg_url: "https://exempel.se/kontakt" }),
-      ],
-      hi,
-    );
+  it("tar aldrig med obekräftade fynd och räknar samma område och sida som ett", () => {
+    const v = valjFynd([
+      fynd({ fynd_id: "a", omrade: "A", belagg_url: "https://exempel.se/" }),
+      fynd({ fynd_id: "a2", omrade: "A", belagg_url: "https://exempel.se/" }),
+      fynd({ fynd_id: "b", omrade: "H", belagg_url: "https://exempel.se/kontakt" }),
+      fynd({ fynd_id: "c", omrade: "D", verifierad: 0 }),
+    ]);
     expect(v.orsak).toBeNull();
-    const ids = v.fynd.map((f) => f.fynd_id);
-    expect(ids).toContain("djup3");
-    expect(ids).toContain("titel");
-    expect(ids).not.toContain("titel2");
-    expect(v.fynd.filter((f) => f.djup === 1)).toHaveLength(1);
-    expect(v.fynd.some((f) => f.forslag_konkret)).toBe(true);
-    expect(v.fynd.length).toBeLessThanOrEqual(3);
+    expect(v.fynd.map((f) => f.fynd_id)).toEqual(["a", "b"]);
+  });
+  it("väljer högst allvar först, högst tre, och en knapptext sist vid lika allvar", () => {
+    const v = valjFynd([
+      fynd({ id: 1, fynd_id: "knapp", omrade: "H", allvar: 2, rubrik: "Knappen heter Läs mer", belagg_url: "https://exempel.se/" }),
+      fynd({ id: 2, fynd_id: "titel", omrade: "D", allvar: 1, belagg_url: "https://exempel.se/" }),
+      fynd({ id: 3, fynd_id: "priser", omrade: "A", allvar: 2, belagg_url: "https://exempel.se/tjanster" }),
+      fynd({ id: 4, fynd_id: "formular", omrade: "G", allvar: 3, belagg_url: "https://exempel.se/kontakt" }),
+    ]);
+    expect(v.orsak).toBeNull();
+    expect(v.fynd.map((f) => f.fynd_id)).toEqual(["formular", "priser", "knapp"]);
+    expect(v.huvud?.fynd_id).toBe("formular");
   });
 });
 
@@ -137,8 +125,8 @@ Vänliga hälsningar`;
   ];
 
   it("godkänner ett korrekt mejl", () => {
-    expect(antalOrd(ok)).toBeGreaterThanOrEqual(150);
-    expect(antalOrd(ok)).toBeLessThanOrEqual(220);
+    expect(antalOrd(ok)).toBeGreaterThanOrEqual(110);
+    expect(antalOrd(ok)).toBeLessThanOrEqual(190);
     expect(sprakfel("Era case på exempelbyran.se säljer er under värde", ok, "")).toEqual([]);
     expect(tillaggsfel(ok, fyndOk)).toEqual([]);
   });
@@ -146,9 +134,9 @@ Vänliga hälsningar`;
     expect(sprakfel("Hej exempel.se", ok.replace("det, och", "det – och"), "")).toContain("innehåller tankstreck");
     expect(sprakfel("Hej: exempel.se", ok, "")).toContain("ämnesraden innehåller kolon");
     expect(sprakfel("Hej exempel.se", `${ok}\nTack!`, "")).toContain("innehåller utropstecken");
-    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "")[0]).toMatch(/ord, ska vara 150 till 220/);
-    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "", undefined, [], 210)[0]).toMatch(/ord, ska vara 150 till 210/);
-    expect(sprakfel("Hej exempel.se", ok, "", undefined, [], antalOrd(ok) - 1)).toContainEqual(expect.stringMatching(/ska vara 150 till/));
+    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "")[0]).toMatch(/ord, ska vara 110 till 190/);
+    expect(sprakfel("Hej exempel.se", "Kort text. rkkommunikation.se", "", undefined, [], 210)[0]).toMatch(/ord, ska vara 110 till 210/);
+    expect(sprakfel("Hej exempel.se", ok, "", undefined, [], antalOrd(ok) - 1)).toContainEqual(expect.stringMatching(/ska vara 110 till/));
     expect(sprakfel("Hej exempel.se", ok, "", undefined, [], antalOrd(ok))).toEqual([]);
     expect(sprakfel("En alldeles för lång ämnesrad som går långt över femtio tecken exempel.se", ok, "")).toContain(
       "ämnesraden är 73 tecken, högst 60",
@@ -177,15 +165,13 @@ Vänliga hälsningar`;
     expect(sprakfel("Hej exempel.se", text, "")).toContain("otillåten länk: cal.com/rawaz");
     expect(sprakfel("Hej exempel.se", text, "https://cal.com/rawaz")).toEqual([]);
   });
-  it("kräver djup 3, konkret förslag på egen rad och siffror ur fynden", () => {
-    expect(tillaggsfel(ok, fyndOk.map((f) => ({ ...f, djup: Math.min(f.djup, 2) })))).toContain("inget av fynden har djup 3");
-    expect(tillaggsfel(ok, fyndOk.map((f) => ({ ...f, forslag_konkret: null })))).toContain("inget av fynden har ett konkret förslag");
+  it("kräver förslaget på egen rad bara när något fynd har ett, och siffror ur fynden", () => {
+    expect(tillaggsfel(ok, fyndOk.map((f) => ({ ...f, forslag_konkret: null })))).toEqual([]);
     expect(tillaggsfel(ok.replace("\n\nGrafisk identitet och webb för företag i Västerås | Exempelbyrån\n\n", " "), fyndOk)).toContain(
       "det konkreta förslaget står inte ordagrant på en egen rad",
     );
     expect(tillaggsfel(ok.replace("nio fält", "12 fält"), fyndOk)).toContain("siffran 12 finns inte i fynden");
     expect(tillaggsfel(ok.replace("nio fält", "9 fält"), fyndOk)).toEqual([]);
-    expect(tillaggsfel(ok, [...fyndOk, fynd({ fynd_id: "x", djup: 1 })])).toContain("fler än ett fynd med djup 1");
     // Meningen om fler fynd får bara finnas när det finns fler bekräftade fynd
     const medFler = ok.replace("Jag hjälper gärna", "Jag såg fler saker som går att förbättra på sajten och dem berättar jag gärna om i ett samtal. Jag hjälper gärna");
     expect(tillaggsfel(medFler, fyndOk, 0)).toContainEqual(expect.stringMatching(/påstår att det finns fler saker/));

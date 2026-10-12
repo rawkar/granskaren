@@ -11,13 +11,14 @@ import fs from "node:fs";
 import path from "node:path";
 import * as cheerio from "cheerio";
 import { z } from "zod";
-import { analysSchema, analysSystem, analysUppgift, stadaAnalys, tolkaAnalys } from "../analyze/analys.js";
+import { analysSystem, analysUppgift, tolkaAnalys } from "../analyze/analys.js";
 import { lasPrompt } from "../analyze/klient.js";
-import { type Analys, type Fynd, VerifieringSchema, type Verifiering } from "../analyze/schema.js";
+import { AnalysSchema, type Analys, type Fynd, VerifieringSchema, type Verifiering } from "../analyze/schema.js";
 import type { Underlag } from "../analyze/underlag.js";
 import { kombineraVerifiering, rensaForslag, verifieraMedKod, verifieringsUppgift, type KodSteg, type VerifieringsResultat } from "../analyze/verifiering.js";
 import { avslutaGranskning, hamtaOchMat, sparaAnalys, tillampaVerifiering } from "../audit.js";
 import { DATA_DIR, konfig, USER_AGENT } from "../config.js";
+import { kontrolleraModell } from "./modell.js";
 import type { Db } from "../db/index.js";
 import {
   hamtaProspekt,
@@ -101,14 +102,6 @@ export function allaStatus(datum: string): SajtStatus[] {
     .sort((a, b) => a.prospektId - b.prospektId);
 }
 
-function kopieraBild(kalla: string | null, mal: string): string | null {
-  if (!kalla || !fs.existsSync(kalla)) return null;
-  const ext = path.extname(kalla) || ".png";
-  const fil = `${mal}${ext}`;
-  fs.copyFileSync(kalla, fil);
-  return path.basename(fil);
-}
-
 function jsonSchema(schema: z.ZodType): unknown {
   return z.toJSONSchema(schema, { target: "draft-7" });
 }
@@ -156,7 +149,7 @@ export async function forbered(d: Db, alt: ForberedAlternativ): Promise<SajtStat
       return p;
     });
   } else {
-    lista = prospektMedStatus(d, ["ny", "kvalificerad"], alt.antal ?? 8);
+    lista = medEgenforetagareSist(prospektMedStatus(d, ["ny", "kvalificerad"]), alt.antal ?? 8);
   }
   const ut: SajtStatus[] = [];
   for (const p of lista) {
@@ -207,18 +200,28 @@ export async function forbered(d: Db, alt: ForberedAlternativ): Promise<SajtStat
     skrivJson(path.join(mapp, "underlag.json"), underlag);
     skrivJson(path.join(mapp, "lankar.json"), lankar);
 
-    const uppgift = analysUppgift(underlag);
-    const bild = kopieraBild(uppgift.skarmbild, path.join(mapp, "analys-skarmbild"));
     fs.writeFileSync(path.join(mapp, "analys-system.md"), analysSystem(), "utf8");
-    fs.writeFileSync(
-      path.join(mapp, "analys-uppgift.md"),
-      [bild && uppgift.skarmbildText ? `${uppgift.skarmbildText}\nBilden ligger i filen ${bild} i samma mapp. Läs den innan du läser underlaget.\n` : "", uppgift.text].filter(Boolean).join("\n"),
-      "utf8",
-    );
-    skrivJson(path.join(mapp, "analys-schema.json"), jsonSchema(analysSchema()));
-    for (const f of ["analys.json", "analys-fel.txt"]) if (fs.existsSync(path.join(mapp, f))) fs.unlinkSync(path.join(mapp, f));
+    fs.writeFileSync(path.join(mapp, "analys-uppgift.md"), analysUppgift(underlag).text, "utf8");
+    skrivJson(path.join(mapp, "analys-schema.json"), jsonSchema(AnalysSchema));
+    for (const f of ["analys.json", "analys-fel.txt", "analys-skarmbild.jpg", "analys-skarmbild.png"]) if (fs.existsSync(path.join(mapp, f))) fs.unlinkSync(path.join(mapp, f));
     ut.push(sparaStatus(alt.datum, s, "forberedd"));
     logg.info(`   arbetspaket: ${mapp}`);
+  }
+  return ut;
+}
+
+/**
+ * Urvalet till ett pass: egenföretagare (kundtyp 1) läggs sist i kön och får högst var tionde plats.
+ * Prospekt utan kundtyp räknas inte som egenföretagare.
+ */
+export function medEgenforetagareSist(prospekt: Prospekt[], antal: number): Prospekt[] {
+  const ovriga = prospekt.filter((p) => p.kundtyp !== 1);
+  const egna = prospekt.filter((p) => p.kundtyp === 1);
+  const maxEgna = Math.floor(antal / 10);
+  const ut = ovriga.slice(0, antal);
+  for (const p of egna) {
+    if (ut.length >= antal || ut.filter((x) => x.kundtyp === 1).length >= maxEgna) break;
+    ut.push(p);
   }
   return ut;
 }
@@ -237,7 +240,7 @@ export function analysIn(d: Db, datum: string, doman: string): InUtfall {
   let analys: Analys;
   try {
     if (!svar.ok) throw new Error(svar.fel);
-    analys = stadaAnalys(tolkaAnalys(svar.data));
+    analys = tolkaAnalys(svar.data);
   } catch (e) {
     s.forsok.analys++;
     const fel = zodFel(e);
@@ -274,13 +277,7 @@ export function analysIn(d: Db, datum: string, doman: string): InUtfall {
       continue;
     }
     behoverModell[f.id] = { kodNot: steg.kodNot, metod: steg.metod };
-    const u = verifieringsUppgift(steg.sida, steg.sida2, f);
-    const bild = kopieraBild(u.skarmbild, path.join(vMapp, `${filnamnSaker(f.id)}-skarmbild`));
-    fs.writeFileSync(
-      path.join(vMapp, `${filnamnSaker(f.id)}.md`),
-      [bild && u.skarmbildText ? `${u.skarmbildText}\nBilden ligger i filen ${bild} i samma mapp. Läs den först.\n` : "", u.text].filter(Boolean).join("\n"),
-      "utf8",
-    );
+    fs.writeFileSync(path.join(vMapp, `${filnamnSaker(f.id)}.md`), verifieringsUppgift(steg.sida, f).text, "utf8");
   }
   skrivJson(path.join(mapp, "kod-resultat.json"), klara);
   skrivJson(path.join(mapp, "kod-steg.json"), behoverModell);
@@ -299,7 +296,7 @@ export function analysIn(d: Db, datum: string, doman: string): InUtfall {
       `Kontrollera varje fynd nedan för sig, med bara det fyndets fil som underlag. Filerna ligger i mappen verifiering/.`,
       ...ids.map((id) => `- ${id}: verifiering/${filnamnSaker(id)}.md`),
       ``,
-      `Svara i verifiering.json med ett objekt där varje nyckel är fyndets id och värdet följer verifiering-schema.json (bedomning och motivering).`,
+      `Svara i verifiering.json med ett objekt där varje nyckel är fyndets id och värdet följer verifiering-schema.json (bedomning, motivering och galler_inte).`,
     ].join("\n"),
     "utf8",
   );
@@ -342,23 +339,29 @@ export function verifieringIn(d: Db, datum: string, doman: string): InUtfall {
         return { ok: false, nyttForsok: true, fel };
       }
       // Som API-vägen när modellkontrollen misslyckas: fynden räknas som inte kontrollerade
-      for (const id of ids) resultat.set(id, { verifierad: false, metod: "ingen", not: `Verifieringen misslyckades: ${fel.slice(0, 200)}` });
+      for (const id of ids) resultat.set(id, { verifierad: false, metod: "ingen", not: `Verifieringen misslyckades: ${fel.slice(0, 200)}`, gallerInte: null });
     }
     if (tolkat) {
       s.forsok.verifiering++;
       for (const id of ids) {
         const steg = behoverModell[id];
-        resultat.set(id, kombineraVerifiering({ kodNot: steg.kodNot, metod: steg.metod, sida: undefined as never, sida2: undefined }, tolkat[id]));
+        resultat.set(id, kombineraVerifiering({ kodNot: steg.kodNot, metod: steg.metod, sida: undefined as never }, tolkat[id]));
       }
     }
   }
 
   const utfall = tillampaVerifiering(d, p, analys, radIds, resultat);
   skrivJson(path.join(mapp, "verifiering-resultat.json"), Object.fromEntries(resultat));
-  avslutaGranskning(d, p, underlag, utfall.analys, utfall.bekraftade, null);
+  avslutaGranskning(d, p, underlag, utfall.analys, utfall.bekraftade);
 
-  // Förbered utkastet
+  // Förbered utkastet. En välskött sajt får inget mejl.
   const uppdaterad = hamtaProspekt(d, p.id)!;
+  if (analys.valskott) {
+    loggaHandelse(d, p.id, "utkast_hoppat", "sajten bedöms som välskött");
+    sattStatus(d, p.id, "i_granskning");
+    sparaStatus(datum, s, "granskningsko", "inget mejl: sajten bedöms som välskött");
+    return { ok: true, nasta: "granskningsko", meddelande: `${utfall.bekraftade} av ${analys.fynd.length} fynd bekräftade. Inget mejl: sajten bedöms som välskött` };
+  }
   const f = forberedUtkast(d, uppdaterad);
   if (f.typ !== "klar") {
     hanteraUtkastHinder(d, uppdaterad, f);
@@ -402,7 +405,7 @@ export function utkastPaket(d: Db, datum: string, doman: string, igen = false): 
 
 function skrivUtkastPaket(mapp: string, p: Prospekt, f: UtkastForberett, tidigareFel: string[]): void {
   fs.writeFileSync(path.join(mapp, "utkast-system.md"), utkastSystem(f.flerFynd), "utf8");
-  fs.writeFileSync(path.join(mapp, "utkast-uppgift.md"), utkastText(utkastUppgifter(p, f.valda, f.huvudinsikt, f.profil, f.tilltal, tidigareFel, f.flerFynd, f.huvudfynd)), "utf8");
+  fs.writeFileSync(path.join(mapp, "utkast-uppgift.md"), utkastText(utkastUppgifter(p, f.valda, f.profil, f.tilltal, tidigareFel, f.flerFynd, f.huvudfynd)), "utf8");
   skrivJson(path.join(mapp, "utkast-schema.json"), jsonSchema(UtkastSchema));
   for (const fil of ["utkast.json", "grind.json", "grind-fel.txt"]) if (fs.existsSync(path.join(mapp, fil))) fs.unlinkSync(path.join(mapp, fil));
   if (tidigareFel.length) skrivFel(mapp, "utkast-fel.txt", `Förra utkastet stoppades av grinden:\n${tidigareFel.map((x) => `- ${x}`).join("\n")}\n\nSkriv ett nytt utkast. Uppgiften i utkast-uppgift.md innehåller också skälen.`);
@@ -456,6 +459,14 @@ export function utkastIn(d: Db, datum: string, doman: string): InUtfall {
   }
 
   skrivJson(path.join(mapp, "utkast-godkant.json"), { brodtext, forsok: s.forsok.utkast });
+  if (konfig().SANDLAGE !== "auto") {
+    // I läget granska läser Rawaz varje mejl, så kodkontrollerna räcker och modellgrinden hoppas över
+    const grind = grindUtfall([], [], f.valda);
+    sparaUtkastResultat(d, p, f, brodtext, grind);
+    skrivJson(path.join(mapp, "grind-resultat.json"), grind);
+    sparaStatus(datum, s, "klar", grind.utfall);
+    return { ok: true, nasta: "klar", meddelande: `kodkontrollerna godkände utkastet -> ${grind.utfall} (modellgrinden körs bara i läget auto)` };
+  }
   fs.writeFileSync(path.join(mapp, "grind-system.md"), lasPrompt("grind"), "utf8");
   fs.writeFileSync(path.join(mapp, "grind-uppgift.md"), grindUppgift({ amne: f.amne, brodtext }, f.valda, f.bra, f.grindAlt), "utf8");
   skrivJson(path.join(mapp, "grind-schema.json"), jsonSchema(GrindSchema));
@@ -701,6 +712,51 @@ export function forfilterIn(d: Db, datum: string, segmentId: number): { godkanda
   return ut;
 }
 
+// ---------- tokens ----------
+
+export type Tokensteg = "analys" | "verifiering" | "utkast" | "grind";
+export type Tokenlogg = Partial<Record<Tokensteg, number>>;
+
+/** Antecknar hur många tokens en underagent drog för ett steg, så som Agent-verktyget rapporterar dem. */
+export function sparaTokens(datum: string, doman: string, steg: Tokensteg, tokens: number): Tokenlogg {
+  const fil = path.join(sajtMapp(datum, doman), "tokens.json");
+  const t: Tokenlogg = fs.existsSync(fil) ? lasJson<Tokenlogg>(fil) : {};
+  t[steg] = (t[steg] ?? 0) + tokens;
+  skrivJson(fil, t);
+  return t;
+}
+
+export function lasTokens(datum: string, doman: string): Tokenlogg {
+  const fil = path.join(sajtMapp(datum, doman), "tokens.json");
+  return fs.existsSync(fil) ? lasJson<Tokenlogg>(fil) : {};
+}
+
+/** Sammanfattning efter passet: antal sajter, antal mejl och tokens per sajt uppdelat på steg. */
+export function tokenRader(datum: string): string[] {
+  const alla = allaStatus(datum);
+  if (!alla.length) return [];
+  const steg: Tokensteg[] = ["analys", "verifiering", "utkast", "grind"];
+  const summa: Record<Tokensteg, number> = { analys: 0, verifiering: 0, utkast: 0, grind: 0 };
+  const rader = [`Tokens per sajt (underagenterna, som Agent-verktyget rapporterar dem)`, `  ${"Sajt".padEnd(30)} ${steg.map((x) => x.padStart(12)).join("")} ${"summa".padStart(12)}`];
+  let mejl = 0;
+  for (const s of alla) {
+    const t = lasTokens(datum, s.doman);
+    if (s.steg === "klar" && s.utfall !== "stoppad") mejl++;
+    let rad = 0;
+    for (const x of steg) {
+      summa[x] += t[x] ?? 0;
+      rad += t[x] ?? 0;
+    }
+    rader.push(`  ${s.doman.padEnd(30)} ${steg.map((x) => String(t[x] ?? 0).padStart(12)).join("")} ${String(rad).padStart(12)}`);
+  }
+  const total = steg.reduce((a, x) => a + summa[x], 0);
+  rader.push(`  ${"summa".padEnd(30)} ${steg.map((x) => String(summa[x]).padStart(12)).join("")} ${String(total).padStart(12)}`);
+  rader.push(`Sajter: ${alla.length}. Mejl: ${mejl}. Tokens per sajt i snitt: ${Math.round(total / alla.length)}.`);
+  return rader;
+}
+
+export { kontrolleraModell };
+
 // ---------- status ----------
 
 export function statusRader(datum: string): string[] {
@@ -711,7 +767,7 @@ export function statusRader(datum: string): string[] {
     rader.push(`  ${s.doman.padEnd(30)} ${s.steg.padEnd(14)} ${`${s.forsok.analys}/${s.forsok.verifiering}/${s.forsok.utkast}/${s.forsok.grind}`.padEnd(16)} ${s.utfall ?? ""}`);
   }
   const nasta = alla.filter((s) => ["forberedd", "analys", "verifiering", "utkast", "grind"].includes(s.steg));
-  rader.push(nasta.length ? `Kvar: ${nasta.map((s) => `${s.doman} (${s.steg})`).join(", ")}` : "Alla sajter är klara. Nästa: granskaren send");
+  rader.push(nasta.length ? `Kvar: ${nasta.map((s) => `${s.doman} (${s.steg})`).join(", ")}` : "Alla sajter är klara. Mejlen ligger i granskningskön: granskaren review");
   return rader;
 }
 

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { exempelfel, huvudpoangfel, meningar, rytmfel, sprakfel, tillaggsfel, tonfel, tvarsakerhetsfel } from "../src/email/grind.js";
-import { valjFynd, valjHuvudfynd } from "../src/email/val.js";
+import { sorteraFynd, valjFynd } from "../src/email/val.js";
 import { flerFyndMening, flerFyndText, lasFlerFyndMeningar, medFlerFynd } from "../src/email/utkast.js";
 import type { FyndRad } from "../src/db/fragor.js";
 
@@ -14,7 +14,7 @@ function fynd(delar: Partial<FyndRad>): FyndRad {
     belagg_url: "https://exempel.se/", belagg_typ: "citat", belagg_varde: "b", effekt: "e", atgard: "a",
     allvar: 2, sakerhet: 0.9, latt_att_forklara: 3, verifierad: 1, verifieringsmetod: "kod", verifieringsnot: null, skapad: "",
     djup: 3, insikt: "i", rotorsak: null, forslag_konkret: null, insats: "liten", kopplar_till_syfte: 1,
-    belagg2_url: null, belagg2_typ: null, belagg2_varde: null,
+    belagg2_url: null, belagg2_typ: null, belagg2_varde: null, galler_inte: null,
     ...delar,
   };
 }
@@ -58,16 +58,13 @@ describe("3. huvudpoängen är fyndet med störst betydelse", () => {
   const knapp = fynd({ fynd_id: "knapp", omrade: "H", belagg_url: "https://exempel.se/", rubrik: "Knappen kan berätta att konsultationen är kostnadsfri", observation: "Knappen heter Boka en konsultation", belagg_varde: "Boka en konsultation", forslag_konkret: "Boka en kostnadsfri konsultation" });
   const priser = fynd({ fynd_id: "priser", omrade: "A", belagg_url: "https://exempel.se/tjanster", rubrik: "De tydliga priserna kan synas redan på startsidan", observation: "Priserna efter RUT-avdrag står bara på tjänstesidan", belagg_varde: "Praktisk hjälp i ditt hem, halvdag 3 timmar 1 200 kr" });
   const omdomen = fynd({ fynd_id: "omdomen", omrade: "G", belagg_url: "https://exempel.se/konsultation", rubrik: "Omdömena kan stå bredvid formuläret", observation: "Startsidan har fem omdömen, konsultationssidan inget", belagg_varde: "omdömen" });
-  const hi = { text: "x", fynd_ids: ["knapp", "priser", "omdomen"] };
-
-  it("väljer högst allvar bland djup 2 och 3, och en knapptext sist vid lika allvar", () => {
-    expect(valjHuvudfynd([knapp, priser, omdomen], new Set(hi.fynd_ids))?.fynd_id).toBe("priser");
-    expect(valjHuvudfynd([knapp, { ...priser, allvar: 1 }, { ...omdomen, allvar: 1 }], new Set(hi.fynd_ids))?.fynd_id).toBe("knapp");
-    expect(valjHuvudfynd([{ ...knapp, allvar: 3 }, priser, omdomen], new Set(hi.fynd_ids))?.fynd_id).toBe("knapp");
-    expect(valjHuvudfynd([fynd({ fynd_id: "grund", djup: 1, allvar: 3 }), priser], new Set())?.fynd_id).toBe("priser");
+  it("väljer högst allvar, och en knapptext sist vid lika allvar", () => {
+    expect(sorteraFynd([knapp, priser, omdomen])[0].fynd_id).toBe("priser");
+    expect(sorteraFynd([knapp, { ...priser, allvar: 1 }, { ...omdomen, allvar: 1 }])[0].fynd_id).toBe("knapp");
+    expect(sorteraFynd([{ ...knapp, allvar: 3 }, priser, omdomen])[0].fynd_id).toBe("knapp");
   });
   it("lägger huvudfyndet först bland de valda", () => {
-    const v = valjFynd([knapp, priser, omdomen], hi);
+    const v = valjFynd([knapp, priser, omdomen]);
     expect(v.orsak).toBeNull();
     expect(v.huvud?.fynd_id).toBe("priser");
     expect(v.fynd[0].fynd_id).toBe("priser");
