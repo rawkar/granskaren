@@ -225,6 +225,12 @@ export const MIGRERINGAR: { namn: string; sql: string }[] = [
       CREATE INDEX soktraffar_segment ON soktraffar(segment_id);
     `,
   },
+  {
+    namn: "005_galler_inte",
+    sql: `
+      ALTER TABLE fynd ADD COLUMN galler_inte TEXT;
+    `,
+  },
 ];
 
 export const PROSPEKT_STATUS = [

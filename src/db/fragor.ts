@@ -75,6 +75,8 @@ export interface FyndRad {
   belagg2_url: string | null;
   belagg2_typ: string | null;
   belagg2_varde: string | null;
+  /** Påstående i fyndet som verifieringen underkände (delvis). Får inte användas i mejlet. */
+  galler_inte: string | null;
 }
 
 export interface Kostnad {
@@ -232,8 +234,8 @@ export function sparaFynd(
     .prepare(
       `INSERT INTO fynd (prospekt_id, fynd_id, omrade, tjansteomrade, rubrik, observation, belagg_url,
         belagg_typ, belagg_varde, effekt, atgard, allvar, sakerhet, latt_att_forklara,
-        djup, insikt, rotorsak, forslag_konkret, insats, kopplar_till_syfte, belagg2_url, belagg2_typ, belagg2_varde)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        djup, insikt, rotorsak, forslag_konkret, insats, kopplar_till_syfte, belagg2_url, belagg2_typ, belagg2_varde, galler_inte)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       f.prospekt_id,
@@ -259,23 +261,13 @@ export function sparaFynd(
       f.belagg2_url,
       f.belagg2_typ,
       f.belagg2_varde,
+      f.galler_inte ?? null,
     );
   return Number(r.lastInsertRowid);
 }
 
-export function sattVerifiering(
-  d: Db,
-  fyndId: number,
-  verifierad: boolean,
-  metod: string,
-  not: string | null,
-): void {
-  d.prepare("UPDATE fynd SET verifierad = ?, verifieringsmetod = ?, verifieringsnot = ? WHERE id = ?").run(
-    verifierad ? 1 : 0,
-    metod,
-    not,
-    fyndId,
-  );
+export function sattVerifiering(d: Db, fyndId: number, verifierad: boolean, metod: string, not: string | null, gallerInte: string | null = null): void {
+  d.prepare("UPDATE fynd SET verifierad = ?, verifieringsmetod = ?, verifieringsnot = ?, galler_inte = ? WHERE id = ?").run(verifierad ? 1 : 0, metod, not, gallerInte, fyndId);
 }
 
 export function fyndForProspekt(d: Db, prospektId: number, baraVerifierade = false): FyndRad[] {

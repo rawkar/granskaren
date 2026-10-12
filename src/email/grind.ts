@@ -6,7 +6,7 @@ import type { Db } from "../db/index.js";
 import { arSparrad, harFattMejl, type FyndRad, type Prospekt } from "../db/fragor.js";
 import { lasPrompt, strukturerat } from "../analyze/klient.js";
 import { normaliseraText } from "../analyze/verifiering.js";
-import { egennamn, faktafel, type Faktakallor } from "./fakta.js";
+import { egennamn, faktafel, gallerIntefel, type Faktakallor } from "./fakta.js";
 import { giltig } from "./kontakter.js";
 
 export interface Grindresultat {
@@ -19,8 +19,8 @@ export interface Grindresultat {
 
 export type Tilltal = "du" | "ni";
 
-export const MIN_ORD = 150;
-export const MAX_ORD = 220;
+export const MIN_ORD = 110;
+export const MAX_ORD = 190;
 export const MAX_AMNE = 60;
 
 /** Räknar ord i brödtexten (före signatur). */
@@ -274,7 +274,7 @@ export function exempelfel(brodtext: string, forslag: string[]): string[] {
 }
 
 /**
- * Regler från tillägget som kontrolleras med kod: fyndens djup, konkret förslag på egen rad, siffror.
+ * Regler som kontrolleras med kod: konkret förslag på egen rad när det finns, siffror ur fynden.
  * flerFynd är antalet bekräftade fynd utanför mejlet när MEJL_FLER_FYND är på (null när den är av). Är den på
  * skriver programmet självt meningen om fler fynd, så modellen får inte skriva någon sådan mening.
  */
@@ -285,11 +285,9 @@ export function tillaggsfel(brodtext: string, fynd: FyndRad[], flerFynd: number 
     if (traff && flerFynd === 0) fel.push(`påstår att det finns fler saker att förbättra ("${traff[0]}") fast inga fler fynd är bekräftade`);
     else if (traff) fel.push(`skriver själv att det finns fler saker att förbättra ("${traff[0]}"), den meningen lägger programmet till`);
   }
-  if (!fynd.some((f) => f.djup === 3)) fel.push("inget av fynden har djup 3");
-  if (fynd.filter((f) => f.djup === 1).length > 1) fel.push("fler än ett fynd med djup 1");
+  // Det konkreta exemplet tas med när något av fynden har ett, annars utelämnas det
   const forslag = fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x);
-  if (forslag.length === 0) fel.push("inget av fynden har ett konkret förslag");
-  else {
+  if (forslag.length > 0) {
     const rader = brodtext.split(/\r?\n/).map((r) => normaliseraText(r));
     const finns = forslag.some((fo) => rader.includes(normaliseraText(fo)));
     if (!finns) fel.push("det konkreta förslaget står inte ordagrant på en egen rad");
@@ -311,8 +309,9 @@ export type Grindsvar = z.infer<typeof GrindSchema>;
 
 export interface GrindAlternativ {
   testlage?: boolean;
-  huvudinsikt?: string | null;
   profil?: string | null;
+  /** Påståenden som verifieringen underkände (galler_inte). Siffror, namn och fraser därifrån får inte förekomma. */
+  gallerInte?: (string | null)[];
   tilltal?: Tilltal;
   flerFynd?: number | null;
   /** Källor för faktaspårningen. Utan källor görs ingen spårning. */
@@ -332,6 +331,7 @@ export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext
   fel.push(...tonfel(utkast.brodtext));
   fel.push(...huvudpoangfel(utkast.brodtext, fynd, alt.huvudfynd));
   fel.push(...exempelfel(utkast.brodtext, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x)));
+  fel.push(...gallerIntefel(utkast.brodtext, alt.gallerInte ?? fynd.map((f) => f.galler_inte)));
   if (alt.kallor) fel.push(...faktafel(utkast.brodtext, alt.kallor));
 
   const namnEllerDoman = [p.namn, p.doman].filter((x): x is string => !!x);
@@ -351,13 +351,13 @@ export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext
   return fel;
 }
 
-/** Det grindens modell får se: mejlet, tilltalet, huvudinsikten, profilen, fynden och det som fungerar bra. */
-export function grindUppgift(utkast: { amne: string; brodtext: string }, fynd: FyndRad[], bra: { text: string }[], alt: GrindAlternativ = {}): string {
-  return `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nTilltal som gäller: ${alt.tilltal ?? "okänt"}\n\nHuvudinsikt:\n${alt.huvudinsikt ?? "(ingen)"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
-    fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, insikt: f.insikt, effekt: f.effekt, forslag_konkret: f.forslag_konkret, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde }, belagg2: f.belagg2_varde })),
+/** Det grindens modell får se: mejlet, tilltalet, profilen och fynden med det som inte får användas. */
+export function grindUppgift(utkast: { amne: string; brodtext: string }, fynd: FyndRad[], _bra: { text: string }[], alt: GrindAlternativ = {}): string {
+  return `Mejl:\nÄmne: ${utkast.amne}\n\n${utkast.brodtext}\n\nTilltal som gäller: ${alt.tilltal ?? "okänt"}\n\nProfil (fakta om organisationen som får användas):\n${alt.profil ?? "(ingen)"}\n\nFynd:\n${JSON.stringify(
+    fynd.map((f) => ({ rubrik: f.rubrik, observation: f.observation, effekt: f.effekt, forslag_konkret: f.forslag_konkret, belagg: { url: f.belagg_url, typ: f.belagg_typ, varde: f.belagg_varde }, galler_inte: f.galler_inte })),
     null,
     1,
-  )}\n\nDet som fungerar bra:\n${JSON.stringify(bra.map((b) => b.text))}`;
+  )}`;
 }
 
 /** Lägger modellens svar till fel och varningar. */

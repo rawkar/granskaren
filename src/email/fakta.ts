@@ -69,15 +69,18 @@ export function byggFaktakallor(p: Pick<Prospekt, "namn" | "doman" | "ort" | "br
     delar.push(f.rubrik, f.observation, f.insikt ?? "", f.effekt, f.atgard, f.forslag_konkret ?? "", f.belagg_varde, f.belagg2_varde ?? "", f.rotorsak ?? "", f.belagg_url, f.belagg2_url ?? "");
   }
   if (profil) {
-    for (const [nyckel, v] of Object.entries(profil)) {
+    for (const [nyckel, v] of Object.entries(profil as Record<string, unknown>)) {
       if (nyckel === "borja_med") continue;
       if (nyckel === "person") {
         const pers = v as Profil["person"];
-        if (pers.fornamn && pers.belagg) delar.push(pers.fornamn, pers.belagg);
+        if (pers?.fornamn && pers.belagg) delar.push(pers.fornamn, pers.belagg);
         continue;
       }
-      const punkt = v as { varde: string; belagg: string | null; gissning: boolean };
-      if (punkt && typeof punkt.varde === "string" && punkt.belagg && !punkt.gissning) delar.push(punkt.varde, punkt.belagg);
+      if (typeof v === "string") delar.push(v);
+      else if (v && typeof v === "object" && "varde" in v) {
+        const punkt = v as { varde: string; belagg: string | null; gissning: boolean };
+        if (typeof punkt.varde === "string" && punkt.belagg && !punkt.gissning) delar.push(punkt.varde, punkt.belagg);
+      }
     }
   }
   const tal = new Set<string>();
@@ -152,6 +155,36 @@ export function faktafel(brodtext: string, kallor: Faktakallor): string[] {
   }
   const varderande = normal.match(VARDERANDE);
   if (varderande && !ordgrans(varderande[0]).test(k.text)) fel.push(`värderande ord "${varderande[0]}" utan stöd i fynden eller profilen`);
+  return fel;
+}
+
+/**
+ * Påståenden som verifieringen underkände (galler_inte) får inte förekomma i mejlet: inga siffror, egennamn eller
+ * fyra ord i följd därifrån. Returnerar ett fel per träff.
+ */
+export function gallerIntefel(brodtext: string, texter: (string | null | undefined)[]): string[] {
+  const fel: string[] = [];
+  const mejl = normaliseraText(brodtext.replace(/https?:\/\/\S+/g, " ")).replace(/[.,;:!?"“”()]/g, "");
+  for (const t of texter) {
+    if (!t) continue;
+    for (const tal of new Set([...t.matchAll(/\d+(?:[.,]\d+)?/g)].map((m) => m[0]))) {
+      if (ordgrans(tal).test(mejl)) fel.push(`siffran ${tal} kommer från ett påstående som verifieringen underkände ("${t}")`);
+    }
+    for (const namn of egennamn(`Fynd. ${t}`)) {
+      if (finnsOrd(namn, mejl)) fel.push(`egennamnet ${namn} kommer från ett påstående som verifieringen underkände ("${t}")`);
+    }
+    const ord = normaliseraText(t).replace(/[.,;:!?"“”()]/g, "").split(" ").filter(Boolean);
+    const bredd = Math.min(4, ord.length);
+    if (bredd >= 3) {
+      for (let i = 0; i + bredd <= ord.length; i++) {
+        const fras = ord.slice(i, i + bredd).join(" ");
+        if (mejl.includes(fras)) {
+          fel.push(`mejlet upprepar ett påstående som verifieringen underkände ("${fras}")`);
+          break;
+        }
+      }
+    }
+  }
   return fel;
 }
 

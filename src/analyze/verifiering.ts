@@ -1,11 +1,10 @@
 import fs from "node:fs";
 import * as cheerio from "cheerio";
-import type Anthropic from "@anthropic-ai/sdk";
 import { konfig } from "../config.js";
 import type { Db } from "../db/index.js";
 import { forslagsfel } from "../email/fakta.js";
 import type { LankKontroll } from "../measure/lankar.js";
-import { bildBlock, lasPrompt, strukturerat } from "./klient.js";
+import { lasPrompt, strukturerat } from "./klient.js";
 import { VerifieringSchema, type Belagg, type Fynd, type Verifiering } from "./schema.js";
 import { hittaSida, korta, nycklarForSida, rensaText, type SidUnderlag, type Underlag } from "./underlag.js";
 
@@ -13,36 +12,30 @@ export interface VerifieringsResultat {
   verifierad: boolean;
   metod: "kod" | "modell" | "kod+modell" | "ingen";
   not: string;
+  /** Påstående i fyndet som inte får användas i mejlet (verifieringen svarade delvis). */
+  gallerInte: string | null;
 }
 
-/** Områden där fyndet är en bedömning och därför alltid kontrolleras av ett andra modellanrop. */
-const BEDOMNINGSOMRADEN = new Set(["A", "C", "H"]);
+/** Områden där fyndet handlar om vad texten säger och därför kontrolleras av modellen efter kodkontrollen. */
+const BEDOMNINGSOMRADEN = new Set(["A", "C", "G", "H"]);
 
 /**
- * Kontrollerar ett fynd mot rådata. Mätvärden, saknade element, statuskoder och citat
- * kontrolleras med kod. Bedömningsfynd, fynd med djup 3 och skärmbildsbelägg kontrolleras
- * dessutom med modell. Fynd med djup 3 kräver två belägg som båda håller.
+ * Kontrollerar ett fynd mot rådata. Mätvärden, saknade element, statuskoder och citat kontrolleras med kod.
+ * Fynd om vad texten säger kontrolleras dessutom av modellen, som bedömer fakta, inte nivå.
  */
-export async function verifieraFynd(
-  d: Db,
-  prospektId: number,
-  u: Underlag,
-  f: Fynd,
-  lankar: LankKontroll[],
-  anvandModell = true,
-): Promise<VerifieringsResultat> {
+export async function verifieraFynd(d: Db, prospektId: number, u: Underlag, f: Fynd, lankar: LankKontroll[], anvandModell = true): Promise<VerifieringsResultat> {
   const steg = verifieraMedKod(u, f, lankar);
   if (steg.klar) return steg.klar;
-  if (!anvandModell) return { verifierad: false, metod: "ingen", not: "Modellkontroll avstängd." };
-  const modell = await kontrolleraMedModell(d, prospektId, steg.sida, steg.sida2, f);
+  if (!anvandModell) return { verifierad: false, metod: "ingen", not: "Modellkontroll avstängd.", gallerInte: null };
+  const modell = await kontrolleraMedModell(d, prospektId, steg.sida, f);
   return kombineraVerifiering(steg, modell);
 }
 
 /**
  * Stryker konkreta förslag med värderande påståenden om mottagaren som inte står ordagrant på sajten.
- * Returnerar en rad per struket förslag. Körs före verifieringen i båda vägarna.
+ * Returnerar en rad per struket förslag. Körs före verifieringen.
  */
-export function rensaForslag(u: Underlag, fynd: Fynd[]): string[] {
+export function rensaForslag(u: Underlag, fynd: Pick<Fynd, "id" | "forslag_konkret">[]): string[] {
   const sidtexter = u.sidor.map((s) => s.text);
   const ut: string[] = [];
   for (const f of fynd) {
@@ -55,10 +48,8 @@ export function rensaForslag(u: Underlag, fynd: Fynd[]): string[] {
   return ut;
 }
 
-/** Kodkontrollen är klar och avgjorde fyndet, eller så behöver fyndet modellens bedömning av de här sidorna. */
-export type KodSteg =
-  | { klar: VerifieringsResultat }
-  | { klar?: undefined; kodNot: string; metod: "kod+modell" | "modell"; sida: SidUnderlag; sida2: SidUnderlag | undefined };
+/** Kodkontrollen är klar och avgjorde fyndet, eller så behöver fyndet modellens bedömning av den här sidan. */
+export type KodSteg = { klar: VerifieringsResultat } | { klar?: undefined; kodNot: string; metod: "kod+modell" | "modell"; sida: SidUnderlag };
 
 /**
  * Kodkontrollen, som alltid går före modellen: belägg av typerna matvarde, saknat_element, statuskod och citat
@@ -66,46 +57,34 @@ export type KodSteg =
  */
 export function verifieraMedKod(u: Underlag, f: Fynd, lankar: LankKontroll[]): KodSteg {
   const kod = kontrolleraMedKod(u, f.belagg, lankar);
-  if (kod && !kod.ok) return { klar: { verifierad: false, metod: "kod", not: kod.not } };
+  if (kod && !kod.ok) return { klar: { verifierad: false, metod: "kod", not: kod.not, gallerInte: null } };
+  const kodNot = kod?.not ?? "";
 
-  let kod2: { ok: boolean; not: string } | null = null;
-  if (f.djup >= 3) {
-    if (!f.belagg2) return { klar: { verifierad: false, metod: "kod", not: "Fynd med djup 3 kräver två belägg, bara ett angavs." } };
-    kod2 = kontrolleraMedKod(u, f.belagg2, lankar);
-    if (kod2 && !kod2.ok) return { klar: { verifierad: false, metod: "kod", not: `Andra belägget: ${kod2.not}` } };
-  }
-  const kodNot = [kod?.not, kod2 ? `Andra belägget: ${kod2.not}` : null].filter(Boolean).join(" ");
-
-  const behoverModell = f.belagg.typ === "skarmbild" || f.belagg2?.typ === "skarmbild" || BEDOMNINGSOMRADEN.has(f.omrade) || f.djup >= 3;
+  const behoverModell = f.belagg.typ === "skarmbild" || BEDOMNINGSOMRADEN.has(f.omrade);
   if (!behoverModell) {
-    return { klar: kod ? { verifierad: true, metod: "kod", not: kodNot } : { verifierad: false, metod: "ingen", not: "Ingen kontroll kunde göras." } };
+    return { klar: kod ? { verifierad: true, metod: "kod", not: kodNot, gallerInte: null } : { verifierad: false, metod: "ingen", not: "Ingen kontroll kunde göras.", gallerInte: null } };
   }
   const sida = hittaSida(u, f.belagg.url);
-  if (!sida) return { klar: { verifierad: false, metod: "kod", not: `URL:en ${f.belagg.url} finns inte bland hämtade sidor.` } };
-  const sida2 = f.belagg2 ? hittaSida(u, f.belagg2.url) : undefined;
-  return { kodNot, metod: kod ? "kod+modell" : "modell", sida, sida2: sida2 && sida2 !== sida ? sida2 : undefined };
+  if (!sida) return { klar: { verifierad: false, metod: "kod", not: `URL:en ${f.belagg.url} finns inte bland hämtade sidor.`, gallerInte: null } };
+  return { kodNot, metod: kod ? "kod+modell" : "modell", sida };
 }
 
-/** Slår ihop kodkontrollens not med modellens bedömning till det slutliga utfallet. */
+/** Slår ihop kodkontrollens not med modellens bedömning. bekraftat och delvis räknas som verifierade, delvis med galler_inte. */
 export function kombineraVerifiering(steg: Exclude<KodSteg, { klar: VerifieringsResultat }>, modell: Verifiering): VerifieringsResultat {
-  const not = [steg.kodNot, `Modell: ${modell.bedomning}. ${modell.motivering}`].filter(Boolean).join(" ");
-  return { verifierad: modell.bedomning === "bekraftat", metod: steg.metod, not };
+  const gallerInte = modell.bedomning === "delvis" ? modell.galler_inte?.trim() || null : null;
+  const not = [steg.kodNot, `Modell: ${modell.bedomning}. ${modell.motivering}`, gallerInte ? `Gäller inte: ${gallerInte}` : ""].filter(Boolean).join(" ");
+  return { verifierad: modell.bedomning !== "fel", metod: steg.metod, not, gallerInte };
 }
 
-/** Det modellen får se för ett fynd: fyndet, sidans kontroller och fullständiga text, och en skärmbild om belägget är en skärmbild. */
-export function verifieringsUppgift(sida: SidUnderlag, sida2: SidUnderlag | undefined, f: Fynd): { skarmbildText: string | null; skarmbild: string | null; text: string } {
-  const sidtext = (s: SidUnderlag) =>
-    [
-      `Sidans URL: ${s.url} (roll: ${s.roll}, titel: ${s.titel ?? "saknas"})`,
-      `Automatiska kontroller och mått:\n${JSON.stringify({ ...s.kontroll, rubriker: s.kontroll.rubriker.slice(0, 20), matt: s.matt }, null, 1)}`,
-      `Sidans fullständiga text:\n${korta(rensaText(s.text), 14000)}`,
-    ].join("\n\n");
-  const medBild = f.belagg.typ === "skarmbild" || f.belagg2?.typ === "skarmbild";
-  const skarmbild = medBild && sida.skarmbild_mobil && fs.existsSync(sida.skarmbild_mobil) ? sida.skarmbild_mobil : null;
+/** Det modellen får se för ett fynd: fyndet, sidans kontroller och text. Ingen skärmbild. */
+export function verifieringsUppgift(sida: SidUnderlag, f: Fynd): { text: string } {
   return {
-    skarmbildText: skarmbild ? `Skärmbild i mobil av ${sida.url}` : null,
-    skarmbild,
-    text: [`Fynd att kontrollera:\n${JSON.stringify(f, null, 1)}`, sidtext(sida), sida2 ? `Andra beläggets sida.\n${sidtext(sida2)}` : ""].filter(Boolean).join("\n\n"),
+    text: [
+      `Fynd att kontrollera:\n${JSON.stringify(f, null, 1)}`,
+      `Sidans URL: ${sida.url} (roll: ${sida.roll}, titel: ${sida.titel ?? "saknas"})`,
+      `Automatiska kontroller och mått:\n${JSON.stringify({ ...sida.kontroll, rubriker: sida.kontroll.rubriker.slice(0, 20), matt: sida.matt }, null, 1)}`,
+      `Sidans fullständiga text:\n${korta(rensaText(sida.text), 12000)}`,
+    ].join("\n\n"),
   };
 }
 
@@ -121,9 +100,7 @@ export function kontrolleraMedKod(u: Underlag, b: Belagg, lankar: LankKontroll[]
     const faktisk = sida?.statuskod ?? lankar.find((l) => normalisera(l.url) === normalisera(b.url))?.status;
     if (faktisk === undefined) return { ok: false, not: `URL:en ${b.url} har inte kontrollerats.` };
     if (faktisk === null) return { ok: forvantad >= 500 || forvantad === 0, not: `Anropet till ${b.url} misslyckades helt (ingen statuskod).` };
-    return faktisk === forvantad
-      ? { ok: true, not: `Statuskod ${faktisk} bekräftad.` }
-      : { ok: false, not: `Påstådd statuskod ${forvantad}, faktisk ${faktisk}.` };
+    return faktisk === forvantad ? { ok: true, not: `Statuskod ${faktisk} bekräftad.` } : { ok: false, not: `Påstådd statuskod ${forvantad}, faktisk ${faktisk}.` };
   }
 
   if (!sida) return { ok: false, not: `URL:en ${b.url} finns inte bland hämtade sidor.` };
@@ -139,9 +116,7 @@ export function kontrolleraMedKod(u: Underlag, b: Belagg, lankar: LankKontroll[]
     }
     if (antal > 0 && /^title$/i.test(varde)) antal = $("title").text().trim() ? antal : 0;
     if (antal > 0 && /meta\[name=.?description.?\]/i.test(varde)) antal = ($('meta[name="description"]').attr("content") ?? "").trim() ? antal : 0;
-    return antal === 0
-      ? { ok: true, not: `Selektorn ${varde} ger noll träffar i renderad HTML.` }
-      : { ok: false, not: `Selektorn ${varde} ger ${antal} träffar, elementet saknas inte.` };
+    return antal === 0 ? { ok: true, not: `Selektorn ${varde} ger noll träffar i renderad HTML.` } : { ok: false, not: `Selektorn ${varde} ger ${antal} träffar, elementet saknas inte.` };
   }
 
   if (typ === "matvarde") {
@@ -180,9 +155,7 @@ function jamfor(nyckel: string, faktiskt: unknown, pastatt: string): { ok: boole
     const tal = Number.parseFloat(p.replace(",", ".").replace(/[^\d.-]/g, ""));
     if (!Number.isFinite(tal)) return { ok: false, not: `${nyckel} är ${faktiskt}, påståendet "${pastatt}" är inte ett tal.` };
     const tolerans = Math.max(Number.isInteger(faktiskt) ? 1 : 0.02, Math.abs(faktiskt) * 0.1);
-    return Math.abs(tal - faktiskt) <= tolerans
-      ? { ok: true, not: `${nyckel}=${faktiskt} bekräftat.` }
-      : { ok: false, not: `${nyckel} är ${faktiskt}, inte ${pastatt}.` };
+    return Math.abs(tal - faktiskt) <= tolerans ? { ok: true, not: `${nyckel}=${faktiskt} bekräftat.` } : { ok: false, not: `${nyckel} är ${faktiskt}, inte ${pastatt}.` };
   }
   if (typeof faktiskt === "boolean") {
     const b = p === "true" || p === "ja" || p === "sant";
@@ -191,43 +164,29 @@ function jamfor(nyckel: string, faktiskt: unknown, pastatt: string): { ok: boole
     return (b ? true : false) === faktiskt ? { ok: true, not: `${nyckel}=${faktiskt} bekräftat.` } : { ok: false, not: `${nyckel} är ${faktiskt}, inte ${pastatt}.` };
   }
   if (faktiskt === null || faktiskt === undefined) {
-    return p === "null" || p === "saknas" || p === "" || p === "none"
-      ? { ok: true, not: `${nyckel} saknar värde, bekräftat.` }
-      : { ok: false, not: `${nyckel} saknar värde, påståendet var "${pastatt}".` };
+    return p === "null" || p === "saknas" || p === "" || p === "none" ? { ok: true, not: `${nyckel} saknar värde, bekräftat.` } : { ok: false, not: `${nyckel} saknar värde, påståendet var "${pastatt}".` };
   }
   if (Array.isArray(faktiskt)) {
     if (/^\d+$/.test(p)) {
-      return Number.parseInt(p, 10) === faktiskt.length
-        ? { ok: true, not: `${nyckel} har ${faktiskt.length} poster, bekräftat.` }
-        : { ok: false, not: `${nyckel} har ${faktiskt.length} poster, inte ${p}.` };
+      return Number.parseInt(p, 10) === faktiskt.length ? { ok: true, not: `${nyckel} har ${faktiskt.length} poster, bekräftat.` } : { ok: false, not: `${nyckel} har ${faktiskt.length} poster, inte ${p}.` };
     }
     if (p === "[]" || p === "tom" || p === "inga") return faktiskt.length === 0 ? { ok: true, not: `${nyckel} är tom, bekräftat.` } : { ok: false, not: `${nyckel} är inte tom.` };
     const finns = faktiskt.some((x) => JSON.stringify(x).toLowerCase().includes(p));
     return finns ? { ok: true, not: `"${pastatt}" finns i ${nyckel}.` } : { ok: false, not: `"${pastatt}" finns inte i ${nyckel}.` };
   }
   const s = String(faktiskt).toLowerCase().trim();
-  return s === p || s.includes(p)
-    ? { ok: true, not: `${nyckel} bekräftat.` }
-    : { ok: false, not: `${nyckel} är "${String(faktiskt).slice(0, 80)}", inte "${pastatt}".` };
+  return s === p || s.includes(p) ? { ok: true, not: `${nyckel} bekräftat.` } : { ok: false, not: `${nyckel} är "${String(faktiskt).slice(0, 80)}", inte "${pastatt}".` };
 }
 
-async function kontrolleraMedModell(d: Db, prospektId: number, sida: SidUnderlag, sida2: SidUnderlag | undefined, f: Fynd): Promise<Verifiering> {
+async function kontrolleraMedModell(d: Db, prospektId: number, sida: SidUnderlag, f: Fynd): Promise<Verifiering> {
   const k = konfig();
-  const innehall: Anthropic.ContentBlockParam[] = [];
-  const uppgift = verifieringsUppgift(sida, sida2, f);
-  const b = bildBlock(uppgift.skarmbild);
-  if (b && uppgift.skarmbildText) {
-    innehall.push({ type: "text", text: uppgift.skarmbildText });
-    innehall.push(b);
-  }
-  innehall.push({ type: "text", text: uppgift.text });
   return strukturerat({
     d,
     prospektId,
     steg: "verifiering",
     modell: k.MODEL_SNABB,
     system: lasPrompt("verifiering"),
-    innehall,
+    innehall: [{ type: "text", text: verifieringsUppgift(sida, f).text }],
     schema: VerifieringSchema,
     maxTokens: 1500,
   });
@@ -239,7 +198,7 @@ export function normaliseraText(s: string): string {
     .replace(/[‘’‚‛]/g, "'")
     .replace(/[“”„‟]/g, '"')
     .replace(/[–—]/g, "-")
-    .replace(/ /g, " ")
+    .replace(/ /g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

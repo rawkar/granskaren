@@ -57,21 +57,11 @@ const underlag: Underlag = {
 
 const bas: Omit<Fynd, "belagg" | "omrade"> = {
   id: "f-001",
-  tjansteomrade: "webb",
   rubrik: "Test",
   observation: "Test",
   effekt: "Test",
-  atgard: "Test",
   allvar: 2,
-  sakerhet: 0.9,
-  latt_att_forklara: 3,
-  djup: 2,
-  insikt: "i",
-  rotorsak: null,
   forslag_konkret: null,
-  insats: "liten",
-  kopplar_till_syfte: true,
-  belagg2: null,
 };
 const belagg = (typ: Belagg["typ"], varde: string, u = url): Belagg => ({ url: u, typ, varde });
 const fynd = (omrade: Fynd["omrade"], typ: Belagg["typ"], varde: string, u = url, extra: Partial<Fynd> = {}): Fynd => ({
@@ -128,17 +118,16 @@ describe("verifieraFynd utan modell", () => {
     expect(r.verifierad).toBe(true);
     expect(r.metod).toBe("kod");
   });
-  it("kräver två belägg för fynd med djup 3 och underkänner om det andra inte håller", async () => {
+  it("skickar fynd om vad texten säger till modellen även när citatet finns", async () => {
     const d = testDb();
-    const utan = await verifieraFynd(d, 1, underlag, fynd("D", "saknat_element", 'meta[name="description"]', url, { djup: 3 }), [], false);
-    expect(utan.verifierad).toBe(false);
-    expect(utan.not).toMatch(/två belägg/);
-    const fel = await verifieraFynd(
-      d, 1, underlag,
-      fynd("D", "saknat_element", 'meta[name="description"]', url, { djup: 3, belagg2: belagg("citat", "finns inte alls") }),
-      [], false,
-    );
-    expect(fel.verifierad).toBe(false);
-    expect(fel.not).toMatch(/Andra belägget/);
+    const r = await verifieraFynd(d, 1, underlag, fynd("G", "citat", "Välkommen"), [], false);
+    expect(r.verifierad).toBe(false);
+    expect(r.metod).toBe("ingen");
+  });
+  it("underkänner ett citat som inte finns innan modellen behövs", async () => {
+    const d = testDb();
+    const r = await verifieraFynd(d, 1, underlag, fynd("A", "citat", "finns inte alls på sidan"), [], false);
+    expect(r.verifierad).toBe(false);
+    expect(r.metod).toBe("kod");
   });
 });
