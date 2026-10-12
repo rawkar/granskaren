@@ -1,61 +1,77 @@
 import { describe, expect, it } from "vitest";
-import { omfangsText, STANDARD_MAX_FYND, upptrappningsSkal } from "../src/analyze/analys.js";
+import { MAX_FYND, tolkaAnalys } from "../src/analyze/analys.js";
+import { AnalysSchema, VerifieringSchema } from "../src/analyze/schema.js";
 
-describe("upptrappning", () => {
-  it("trappar inte upp när analysen håller", () => {
-    expect(upptrappningsSkal({ huvudinsikt: true, bekraftade: 3, djup3Bekraftat: true })).toBeNull();
-  });
-  it("trappar upp utan huvudinsikt, utan djup 3 eller med färre än tre bekräftade", () => {
-    expect(upptrappningsSkal({ huvudinsikt: false, bekraftade: 4, djup3Bekraftat: true })).toBe("ingen huvudinsikt");
-    expect(upptrappningsSkal({ huvudinsikt: true, bekraftade: 4, djup3Bekraftat: false })).toBe("inget bekräftat fynd med djup 3");
-    expect(upptrappningsSkal({ huvudinsikt: true, bekraftade: 2, djup3Bekraftat: true })).toBe("bara 2 fynd bekräftade");
-  });
-});
-import { AnalysKortSchema, franKortAnalys } from "../src/analyze/schema.js";
-
-describe("omfång för analysen", () => {
-  it("lägger inte till något när prompten gäller som den är skriven", () => {
-    expect(omfangsText(STANDARD_MAX_FYND, false)).toBe("");
-    expect(omfangsText(8, false)).toBe("");
-  });
-
-  it("begär färre fynd och minst ett med djup 3", () => {
-    const t = omfangsText(4, false);
-    expect(t).toContain("högst 4 fynd");
-    expect(t).toContain("djup 3");
-    expect(t).toContain("konkret förslag");
-    expect(t).not.toContain("insikt och rotorsak");
-  });
-
-  it("beskriver det sammanslagna fältet när analysen är kort", () => {
-    const t = omfangsText(4, true);
-    expect(t).toContain("högst 4 fynd");
-    expect(t).toContain("insikt och rotorsak finns inte");
-    expect(t).toContain("högst två meningar");
-  });
+const fynd = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  omrade: "A",
+  rubrik: `Rubrik ${id}`,
+  observation: "Texten står i sidfoten.",
+  belagg: { url: "https://exempel.se/", typ: "citat", varde: "6 km från Eskilstuna" },
+  effekt: "Besökaren får leta.",
+  allvar: 2,
+  forslag_konkret: null,
+  ...extra,
 });
 
-describe("kort analys", () => {
-  it("saknar insikt och rotorsak i schemat och fyller dem efteråt", () => {
-    const fynd = AnalysKortSchema.shape.fynd.element;
-    expect(Object.keys(fynd.shape)).not.toContain("insikt");
-    expect(Object.keys(fynd.shape)).not.toContain("rotorsak");
-    expect(Object.keys(fynd.shape)).toContain("belagg");
-    expect(Object.keys(fynd.shape)).toContain("forslag_konkret");
-    expect(Object.keys(fynd.shape)).toContain("djup");
-    const a = franKortAnalys({
+describe("den lätta analysen", () => {
+  it("tolkar ett svar med bara de nya fälten", () => {
+    const a = tolkaAnalys({
       organisationstyp: "forening",
-      organisationsnamn: "X",
-      profil: {} as never,
-      sammanfattning: "",
+      organisationsnamn: "Torshälla GK",
+      profil: { person: { drivs_av_namngiven_person: false, fornamn: null, sakerhet: 0.9, belagg: null }, vad_de_gor: "Golfklubb med 18 hål", huvudhandling: "bli medlem" },
       valskott: false,
-      bra: [],
-      fynd: [{ id: "F1", omrade: "A", tjansteomrade: "strategi", rubrik: "r", observation: "o", belagg: { url: "u", typ: "citat", varde: "v" }, belagg2: null, effekt: "e", atgard: "a", allvar: 2, sakerhet: 0.8, latt_att_forklara: 2, djup: 3, forslag_konkret: null, insats: "liten", kopplar_till_syfte: true }],
-      huvudinsikt: null,
+      fynd: [fynd("f1"), fynd("f2", { allvar: 7, forslag_konkret: '"Bli medlem i Torshälla GK."' })],
+    });
+    expect(a.fynd).toHaveLength(2);
+    expect(a.fynd[1].allvar).toBe(3);
+    expect(a.fynd[1].forslag_konkret).toBe("Bli medlem i Torshälla GK");
+    expect(a.profil.vad_de_gor).toBe("Golfklubb med 18 hål");
+  });
+
+  it("tolkar ett äldre fördjupat svar: extra fält tas bort och profilpunkter med varde blir text", () => {
+    const a = tolkaAnalys({
+      organisationstyp: "aktiebolag",
+      organisationsnamn: "Lovisualisera",
+      profil: {
+        person: { drivs_av_namngiven_person: true, fornamn: "Lovisa", sakerhet: 0.8, belagg: "Ring eller maila mig" },
+        vad_de_gor: { varde: "Inredningsprojekt", sakerhet: 0.9, belagg: "x", gissning: false },
+        for_vem: { varde: "Privatpersoner", sakerhet: 0.5, belagg: null, gissning: true },
+        huvudhandling: { varde: "boka platsbesök", sakerhet: 0.9, belagg: "boka in oss", gissning: false },
+      },
+      sammanfattning: "...",
+      valskott: false,
+      bra: [{ text: "x", url: null }],
+      fynd: [fynd("f1", { tjansteomrade: "strategi", djup: 3, insikt: "i", rotorsak: null, atgard: "a", sakerhet: 0.8, latt_att_forklara: 3, insats: "liten", kopplar_till_syfte: true, belagg2: null })],
+      huvudinsikt: { text: "...", fynd_ids: ["f1"] },
       borja_med: [],
     });
-    expect(a.fynd[0].insikt).toBe("");
-    expect(a.fynd[0].rotorsak).toBeNull();
-    expect(a.fynd[0].observation).toBe("o");
+    expect(a.profil.vad_de_gor).toBe("Inredningsprojekt");
+    expect(a.profil.huvudhandling).toBe("boka platsbesök");
+    expect("huvudinsikt" in a).toBe(false);
+    expect("djup" in a.fynd[0]).toBe(false);
+  });
+
+  it("klipper till högst fyra fynd och gör id:n unika", () => {
+    const a = tolkaAnalys({
+      organisationstyp: "okand",
+      organisationsnamn: null,
+      profil: { person: { drivs_av_namngiven_person: false, fornamn: null, sakerhet: 0.5, belagg: null }, vad_de_gor: "x", huvudhandling: "y" },
+      valskott: false,
+      fynd: [fynd("f1"), fynd("f1"), fynd("f3"), fynd("f4"), fynd("f5")],
+    });
+    expect(a.fynd).toHaveLength(MAX_FYND);
+    expect(a.fynd.map((f) => f.id)).toEqual(["f1", "f1b", "f3", "f4"]);
+  });
+
+  it("kräver profil och fynd", () => {
+    expect(AnalysSchema.safeParse({ organisationstyp: "okand", organisationsnamn: null, valskott: false, fynd: [] }).success).toBe(false);
+  });
+});
+
+describe("verifieringens svar", () => {
+  it("tillåter bekraftat, delvis och fel med galler_inte", () => {
+    expect(VerifieringSchema.parse({ bedomning: "delvis", motivering: "x", galler_inte: "knappen är den enda som syns högt upp i mobilen" }).galler_inte).toMatch(/knappen/);
+    expect(VerifieringSchema.safeParse({ bedomning: "osakert", motivering: "x", galler_inte: null }).success).toBe(false);
   });
 });

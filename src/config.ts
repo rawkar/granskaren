@@ -70,17 +70,10 @@ const schema = z.object({
   /** Kostnadstak per kalendermånad i USD enligt tabellen kostnader. 0 betyder inget tak. Körningar avbryts när det nås. */
   MAX_KOSTNAD_PER_MANAD: belopp(0),
 
-  /** Högsta antal fynd analysen tar fram per sajt. 6 är prompten som den är skriven, 4 ger kortare och billigare analys. */
-  ANALYS_MAX_FYND: heltal(6),
-  /** true slår ihop observation, insikt och rotorsak till ett fält på högst två meningar. */
-  ANALYS_KORT: bool,
-  /** true kör analysen om på MODEL_UPPTRAPPNING när huvudinsikt saknas, inget bekräftat fynd har djup 3 eller färre än tre fynd bekräftas. */
-  UPPTRAPPNING: bool,
-  MODEL_UPPTRAPPNING: z.string().optional().default("claude-opus-5-5"),
-  /** Ordmål för brödtexten som skickas med till modellen. 0 betyder promptens eget mål (160 till 200). */
-  MEJL_ORDMAL: heltal(0),
-  /** Grindens övre ordgräns för brödtexten. Standard 220. */
-  MEJL_MAX_ORD: heltal(220),
+  /** Ordmål för brödtexten som skickas med till modellen. 0 betyder promptens eget mål. */
+  MEJL_ORDMAL: heltal(150),
+  /** Grindens övre ordgräns för brödtexten. */
+  MEJL_MAX_ORD: heltal(190),
   /** true lägger till en mening före erbjudandet om att Rawaz såg fler saker, bara när det finns bekräftade fynd utanför mejlet. */
   MEJL_FLER_FYND: bool,
   /** Livslängd på cachen för systemprompten. 1h lönar sig när sajterna ligger mer än fem minuter isär. */
@@ -144,7 +137,6 @@ export function konfig(): Konfig {
   if (process.env.TORRKORNING === undefined) resultat.data.TORRKORNING = true;
   if (!resultat.data.MODEL_DISCOVER.trim()) resultat.data.MODEL_DISCOVER = resultat.data.MODEL_ANALYS;
   if (resultat.data.MAX_SIDOR_PER_SAJT > 8) resultat.data.MAX_SIDOR_PER_SAJT = 8;
-  resultat.data.ANALYS_MAX_FYND = Math.min(8, Math.max(2, resultat.data.ANALYS_MAX_FYND));
   if (resultat.data.PAUS_MELLAN_SIDOR_MS < 2000) resultat.data.PAUS_MELLAN_SIDOR_MS = 2000;
   cache = resultat.data;
   return cache;

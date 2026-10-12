@@ -60,11 +60,79 @@ export function hittaSida(u: Underlag, url: string): SidUnderlag | undefined {
   return u.sidor.find((s) => normaliseraUrl(s.url) === n || normaliseraUrl(s.slutlig_url) === n);
 }
 
+/** De sidor den lätta analysen får se: startsidan, kontaktsidan och den viktigaste handlingssidan (eller tjänstesidan). */
+export function sidorForLattAnalys(u: Underlag): SidUnderlag[] {
+  const start = u.sidor.find((s) => s.roll === "start");
+  const kontakt = u.sidor.find((s) => s.roll === "kontakt");
+  const handling = u.sidor.find((s) => s.roll === "handling") ?? u.sidor.find((s) => s.roll === "tjanst");
+  return [start, kontakt, handling].filter((s, i, arr): s is SidUnderlag => !!s && arr.indexOf(s) === i);
+}
+
 /**
- * Det modellen får se. Sidtext i stället för skärmbilder, kortad till det väsentliga,
- * och bara de mätvärden som behövs. Håller kostnaden per sajt nere.
+ * Det bantade underlaget för den lätta analysen: tre sidor med text kortad till det väsentliga, de kontroller och
+ * mått som oftast blir belägg, och sajtens nyckeltal. Ingen skärmbild. Håller tokens per sajt nere.
  */
 export function underlagForModell(u: Underlag): unknown {
+  return {
+    doman: u.doman,
+    namn: u.namn,
+    bransch: u.bransch,
+    ort: u.ort,
+    sajt: {
+      https_ok: u.sajt.https_ok,
+      sitemap_finns: u.sajt.sitemap_finns,
+      analysverktyg: u.sajt.analysverktyg,
+      doda_lankar: u.sajt.doda_lankar.slice(0, 4),
+      sidor_utan_metabeskrivning: u.sajt.sidor_utan_metabeskrivning.slice(0, 6),
+      sidor_utan_h1: u.sajt.sidor_utan_h1.slice(0, 6),
+      plattform: u.matt?.plattform ?? null,
+      case_antal: u.matt?.case_antal ?? 0,
+      tjanstesidor_antal: u.matt?.tjanstesidor_antal ?? 0,
+    },
+    sidor: sidorForLattAnalys(u).map((s) => ({
+      roll: s.roll,
+      url: s.url,
+      statuskod: s.statuskod,
+      titel: s.titel,
+      laddtid_ms: s.laddtid_ms,
+      text: korta(rensaText(s.text), s.roll === "start" ? 3000 : 1800),
+      kontroll: lattKontroll(s.kontroll),
+      matt: s.matt ? { formular: s.matt.formular, rubriker_antal: s.matt.rubriker_antal } : null,
+      lighthouse: s.lighthouse
+        ? { poang_prestanda: s.lighthouse.poang_prestanda, lcp_ms: s.lighthouse.lcp_ms, sidvikt_kb: s.lighthouse.sidvikt_kb, bilder_kb: s.lighthouse.bilder_kb, bildbesparing_kb: s.lighthouse.bildbesparing_kb }
+        : null,
+      axe: s.axe ? { critical_antal: s.axe.critical_antal, serious_antal: s.axe.serious_antal, brister: s.axe.brister.slice(0, 3).map((b) => ({ id: b.id, hjalp: b.hjalp, antal_element: b.antal_element })) } : null,
+    })),
+  };
+}
+
+function lattKontroll(k: SidKontroll): Partial<SidKontroll> {
+  return {
+    titel: k.titel,
+    titel_saknas: k.titel_saknas,
+    metabeskrivning: k.metabeskrivning,
+    metabeskrivning_saknas: k.metabeskrivning_saknas,
+    h1_antal: k.h1_antal,
+    h1_text: k.h1_text.slice(0, 3),
+    rubriker: k.rubriker.slice(0, 10),
+    menyord: k.menyord.slice(0, 10),
+    bilder_antal: k.bilder_antal,
+    bilder_utan_alt: k.bilder_utan_alt,
+    lang_saknas: k.lang_saknas,
+    formular_antal: k.formular_antal,
+    formularfalt_antal: k.formularfalt_antal,
+    formularfalt_utan_etikett: k.formularfalt_utan_etikett,
+    analysverktyg: k.analysverktyg,
+    otydliga_lanktexter: k.otydliga_lanktexter,
+    otydliga_lanktexter_exempel: k.otydliga_lanktexter_exempel.slice(0, 3),
+  };
+}
+
+/**
+ * Hela underlaget för den fördjupade analysen (granskaren fordjupa): alla sidor, fler mått, Lighthouse och axe.
+ * Det som var standard till den 12 oktober 2026.
+ */
+export function underlagForFordjupning(u: Underlag): unknown {
   const viktiga = new Set(["start", "handling", "tjanst", "case", "om"]);
   return {
     doman: u.doman,

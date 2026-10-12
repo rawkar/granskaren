@@ -150,15 +150,7 @@ export function avbrytPaus(d: Db): boolean {
 export function tillampaPaus(d: Db): Paus | null {
   const p = pausad(d);
   if (!p) return null;
-  const k = konfig();
-  k.MODEL_ANALYS = k.MODEL_UPPTRAPPNING;
-  k.ANALYS_MAX_FYND = 6;
-  k.ANALYS_KORT = false;
-  k.UPPTRAPPNING = false;
-  k.MEJL_ORDMAL = 0;
-  k.MEJL_MAX_ORD = 220;
-  k.MEJL_FLER_FYND = false;
-  logg.varning(`Ändringarna är pausade sedan ${p.datum} (${p.skal.join("; ")}). Kör med ${k.MODEL_ANALYS} och promptens standardomfång. Ta bort pausen med: granskaren paus --av`);
+  logg.varning(`Ändringarna är pausade sedan ${p.datum} (${p.skal.join("; ")}). Ta bort pausen med: granskaren paus --av`);
   return p;
 }
 
@@ -199,7 +191,7 @@ export async function vaktaOchPausa(d: Db, nu = new Date()): Promise<Paus | null
         [
           `Hej Rawaz,`,
           ``,
-          `Kvalitetsvakten slog till ${p.datum} och ändringarna är pausade. Driften kör nu ${k.MODEL_UPPTRAPPNING} med promptens standardomfång tills du tar bort pausen.`,
+          `Kvalitetsvakten slog till ${p.datum} och ändringarna är pausade tills du tar bort pausen.`,
           ``,
           `Skäl:`,
           ...skal.map((s) => `- ${s}`),

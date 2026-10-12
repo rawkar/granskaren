@@ -34,6 +34,8 @@ import {
 } from "./pass/pass.js";
 import { kvotEfter, kvotFore, kvotSammanfattning, kvotSnitt, lasKvotLogg } from "./pass/kvot.js";
 import { kontrolleraModell, MODELL_PER_STEG } from "./pass/modell.js";
+import { fordjupaIn, fordjupaPaket } from "./pass/fordjupa.js";
+import { sparaTokens, tokenRader, type Tokensteg } from "./pass/pass.js";
 import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
@@ -350,11 +352,24 @@ pass
 
 pass
   .command("status")
-  .description("Visar var varje sajt i passet står")
+  .description("Visar var varje sajt i passet står, och tokens per sajt och steg")
   .option("--datum <d>", "passets datum", passIdag())
   .action((o: { datum: string }) => {
     konfig();
     for (const rad of statusRader(o.datum)) console.log(rad);
+    for (const rad of tokenRader(o.datum)) console.log(rad);
+  });
+
+pass
+  .command("tokens <doman>")
+  .description("Antecknar hur många tokens en underagent drog för ett steg (talet subagent_tokens i Agent-verktygets svar)")
+  .requiredOption("--steg <steg>", "analys, verifiering, utkast eller grind")
+  .requiredOption("--antal <n>", "antal tokens")
+  .option("--datum <d>", "passets datum", passIdag())
+  .action((doman: string, o: { steg: string; antal: string; datum: string }) => {
+    konfig();
+    const t = sparaTokens(o.datum, normaliseraDoman(doman) ?? doman, o.steg as Tokensteg, Number.parseInt(o.antal, 10) || 0);
+    console.log(`TOKENS ${doman} ${Object.entries(t).map(([k, v]) => `${k}=${v}`).join(" ")}`);
   });
 
 pass
@@ -470,6 +485,29 @@ pass
   });
 
 program
+  .command("fordjupa <doman>")
+  .description("Skriver arbetspaketet för den fördjupade analysen (huvudinsikt, åtgärdslista, rapport) för en sajt som har svarat. Körs bara på begäran. En underagent granskaren-analys skriver analys.json i mappen, sedan: granskaren fordjupa-in <domän>")
+  .action((doman: string) => {
+    konfig();
+    const r = fordjupaPaket(db(), normaliseraDoman(doman) ?? doman);
+    console.log(`Arbetspaket för fördjupad analys i ${r.mapp}${r.skarmbild ? ` (skärmbild ${r.skarmbild})` : ""}. Starta granskaren-analys på mappen och kör sedan: granskaren fordjupa-in ${doman}`);
+  });
+
+program
+  .command("fordjupa-in <doman>")
+  .description("Läser analys.json från den fördjupade analysen, kontrollerar beläggen med kod och skriver data/rapporter/<domän>-fordjupning.md")
+  .action((doman: string) => {
+    konfig();
+    const r = fordjupaIn(db(), normaliseraDoman(doman) ?? doman);
+    if (!r.ok) {
+      console.log(`UTFALL nytt_forsok ${doman}  ${r.fel}`);
+      process.exitCode = 2;
+      return;
+    }
+    console.log(`UTFALL ok ${doman}  ${r.fynd} fynd, ${r.bekraftade} med kodbekräftade belägg. Rapport: ${r.rapport}`);
+  });
+
+program
   .command("paus")
   .description("Visar om kvalitetsvakten har pausat ändringarna, och tar bort pausen med --av")
   .option("--av", "ta bort pausen så att inställningarna i .env gäller igen", false)
@@ -485,7 +523,7 @@ program
       logg.info("Ingen paus. Inställningarna i .env gäller.");
       return;
     }
-    logg.info(`Ändringarna är pausade sedan ${p.datum}: ${p.skal.join("; ")}. Driften kör på ${konfig().MODEL_UPPTRAPPNING}. Ta bort pausen med: granskaren paus --av`);
+    logg.info(`Ändringarna är pausade sedan ${p.datum}: ${p.skal.join("; ")}. Ta bort pausen med: granskaren paus --av`);
   });
 
 program

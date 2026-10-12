@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "../config.js";
 import type { Db } from "../db/index.js";
-import { braForProspekt, fyndForProspekt, hamtaProspekt, kostnadForProspekt, type FyndRad } from "../db/fragor.js";
-import { OMRADEN, type Huvudinsikt, type Omrade, type Profil } from "../analyze/schema.js";
+import { fyndForProspekt, hamtaProspekt, type FyndRad } from "../db/fragor.js";
+import { OMRADEN, type Omrade } from "../analyze/schema.js";
 import type { Underlag } from "../analyze/underlag.js";
 import { dataMapp, filnamnSaker } from "../util/fil.js";
 
@@ -11,29 +11,30 @@ export function rapportSokvag(doman: string): string {
   return path.join(dataMapp("rapporter"), `${filnamnSaker(doman)}.md`);
 }
 
-const PROFILRUBRIKER: Record<string, string> = {
-  vad_de_gor: "Vad de gör",
-  for_vem: "För vem",
-  omrade: "Område",
-  syfte: "Sajtens syfte",
-  huvudhandling: "Viktigaste handling",
-  skiljer_sig: "Vad som skiljer dem",
-  ton: "Ton och tilltal",
-};
+/** Läser en profilpunkt oavsett om den är text (lätta analysen) eller ett objekt med varde (äldre analyser). */
+export function profilText(v: unknown): string | null {
+  if (typeof v === "string") return v.trim() || null;
+  if (v && typeof v === "object" && "varde" in v) {
+    const p = v as { varde?: unknown; gissning?: boolean };
+    return typeof p.varde === "string" && !p.gissning ? p.varde : null;
+  }
+  return null;
+}
 
-/** Skriver data/rapporter/<domän>.md. Rapporten är Rawaz underlag inför ett möte. */
-export function skrivRapport(d: Db, prospektId: number, u: Underlag, sammanfattning: string, valskott: boolean): string {
+interface SparadProfil {
+  person?: { drivs_av_namngiven_person: boolean; fornamn: string | null; sakerhet: number; belagg: string | null };
+  vad_de_gor?: unknown;
+  huvudhandling?: unknown;
+}
+
+/** Skriver data/rapporter/<domän>.md: den lätta granskningens fynd och mätvärden. Rawaz underlag när någon svarar. */
+export function skrivRapport(d: Db, prospektId: number, u: Underlag, valskott: boolean): string {
   const p = hamtaProspekt(d, prospektId);
   if (!p) throw new Error(`Prospekt ${prospektId} saknas`);
   const fynd = fyndForProspekt(d, prospektId);
   const bekraftade = fynd.filter((f) => f.verifierad === 1);
   const ejBekraftade = fynd.filter((f) => f.verifierad !== 1);
-  const bra = braForProspekt(d, prospektId);
-  const kostnad = kostnadForProspekt(d, prospektId);
-  const rapportMapp = dataMapp("rapporter");
-  const rel = (s: string | null) => (s ? path.relative(rapportMapp, s).replace(/\\/g, "/") : null);
-  const profil = p.profil ? (JSON.parse(p.profil) as Profil & { borja_med?: { atgard: string; insats: string; effekt: string }[] }) : null;
-  const huvudinsikt = p.huvudinsikt ? (JSON.parse(p.huvudinsikt) as Huvudinsikt) : null;
+  const profil = p.profil ? (JSON.parse(p.profil) as SparadProfil) : null;
 
   const r: string[] = [];
   r.push(`# Granskning av ${p.namn ?? p.doman}`);
@@ -45,49 +46,18 @@ export function skrivRapport(d: Db, prospektId: number, u: Underlag, sammanfattn
   if (u.matt?.plattform) r.push(`Plattform: ${[u.matt.plattform, u.matt.tema ? `tema ${u.matt.tema}` : null].filter(Boolean).join(", ")}  `);
   r.push(`Bekräftade fynd: ${bekraftade.length} av ${fynd.length}  `);
   if (valskott) r.push(`Bedömning: sajten är överlag välskött, inget mejl skickas.  `);
-  r.push(`API-kostnad för granskningen: ${kostnad.toFixed(3)} USD`);
   r.push("");
 
   if (profil) {
     r.push("## Profil");
     r.push("");
-    if (profil.person) r.push(`- **Namngiven person.** ${profil.person.drivs_av_namngiven_person ? `ja, ${profil.person.fornamn ?? "förnamn saknas"} (tilltal du)` : "nej (tilltal ni)"} [säkerhet ${profil.person.sakerhet.toFixed(2)}]${profil.person.belagg ? ` Belägg: "${profil.person.belagg}"` : ""}`);
-    for (const [nyckel, rubrik] of Object.entries(PROFILRUBRIKER)) {
-      const punkt = (profil as unknown as Record<string, { varde: string; sakerhet: number; belagg: string | null; gissning: boolean }>)[nyckel];
-      if (!punkt) continue;
-      r.push(`- **${rubrik}.** ${punkt.varde}${punkt.gissning ? " (gissning)" : ""} [säkerhet ${punkt.sakerhet.toFixed(2)}]${punkt.belagg ? ` Belägg: "${punkt.belagg}"` : ""}`);
-    }
+    if (profil.person) r.push(`- **Namngiven person.** ${profil.person.drivs_av_namngiven_person ? `ja, ${profil.person.fornamn ?? "förnamn saknas"} (tilltal du)` : "nej (tilltal ni)"}${profil.person.belagg ? ` Belägg: "${profil.person.belagg}"` : ""}`);
+    const vad = profilText(profil.vad_de_gor);
+    const handling = profilText(profil.huvudhandling);
+    if (vad) r.push(`- **Vad de gör.** ${vad}`);
+    if (handling) r.push(`- **Handlingen sajten vill leda till.** ${handling}`);
     r.push("");
   }
-
-  r.push("## Huvudinsikt");
-  r.push("");
-  if (huvudinsikt) {
-    r.push(huvudinsikt.text);
-    r.push("");
-    r.push(`Bygger på fynd: ${huvudinsikt.fynd_ids.join(", ")}`);
-  } else {
-    r.push("Ingen huvudinsikt kunde formuleras med stöd i bekräftade fynd. Inget mejl skrivs automatiskt.");
-  }
-  r.push("");
-
-  if (profil?.borja_med?.length) {
-    r.push("## Det här skulle jag börja med");
-    r.push("");
-    profil.borja_med.forEach((b, i) => r.push(`${i + 1}. ${b.atgard} (insats ${b.insats}). ${b.effekt}`));
-    r.push("");
-  }
-
-  r.push("## Sammanfattning");
-  r.push("");
-  r.push(sammanfattning);
-  r.push("");
-
-  r.push("## Det som fungerar bra");
-  r.push("");
-  if (bra.length === 0) r.push("Inget särskilt noterat.");
-  for (const b of bra) r.push(`- ${b.text}${b.url ? ` (${b.url})` : ""}`);
-  r.push("");
 
   r.push("## Bekräftade fynd");
   r.push("");
@@ -105,12 +75,32 @@ export function skrivRapport(d: Db, prospektId: number, u: Underlag, sammanfattn
     r.push("");
     r.push("Dessa används aldrig i ett mejl. De finns med för att du ska kunna se vad modellen föreslog och varför det stoppades.");
     r.push("");
-    for (const f of ejBekraftade) {
-      r.push(`- **${f.rubrik}** (${f.omrade}, djup ${f.djup}, ${f.belagg_typ}). ${f.verifieringsnot ?? "Ingen notering."}`);
-    }
+    for (const f of ejBekraftade) r.push(`- **${f.rubrik}** (${f.omrade}, ${f.belagg_typ}). ${f.verifieringsnot ?? "Ingen notering."}`);
     r.push("");
   }
 
+  r.push(...matvardenTillMarkdown(u, dataMapp("rapporter")));
+  r.push("");
+  r.push(`En fördjupad analys med huvudinsikt och åtgärdslista görs med: granskaren fordjupa ${p.doman}`);
+
+  const sokvag = rapportSokvag(p.doman);
+  fs.writeFileSync(sokvag, r.join("\n"), "utf8");
+  return sokvag;
+}
+
+function fyndTillMarkdown(f: FyndRad): string[] {
+  const rader = [`#### ${f.rubrik}`, "", `${f.observation}`, "", `- Allvar ${f.allvar}`, `- Belägg: ${f.belagg_typ} på ${f.belagg_url}`, `- Värde: \`${f.belagg_varde.replace(/`/g, "'")}\``, `- Effekt: ${f.effekt}`];
+  if (f.forslag_konkret) rader.push(`- Konkret förslag: ${f.forslag_konkret}`);
+  if (f.galler_inte) rader.push(`- Gäller inte (får inte användas i mejl): ${f.galler_inte}`);
+  rader.push(`- Verifierad med ${f.verifieringsmetod ?? "okänt"}. ${f.verifieringsnot ?? ""}`);
+  rader.push("");
+  return rader;
+}
+
+/** Mätvärdesavsnittet, gemensamt för den lätta och den fördjupade rapporten. */
+export function matvardenTillMarkdown(u: Underlag, rapportMapp: string): string[] {
+  const rel = (s: string | null) => (s ? path.relative(rapportMapp, s).replace(/\\/g, "/") : null);
+  const r: string[] = [];
   r.push("## Mätvärden");
   r.push("");
   r.push("### Sajten");
@@ -192,33 +182,7 @@ export function skrivRapport(d: Db, prospektId: number, u: Underlag, sammanfattn
     if (mobil) r.push(`![${s.roll} mobil](${mobil})`);
     r.push("");
   }
-
-  const sokvag = rapportSokvag(p.doman);
-  fs.writeFileSync(sokvag, r.join("\n"), "utf8");
-  return sokvag;
-}
-
-function fyndTillMarkdown(f: FyndRad): string[] {
-  const rader = [
-    `#### ${f.rubrik}`,
-    "",
-    `${f.observation}`,
-    "",
-    `- Djup ${f.djup}, insats ${f.insats ?? "okänd"}${f.kopplar_till_syfte ? "" : ", kopplar inte till sajtens syfte"}`,
-  ];
-  if (f.insikt) rader.push(`- Insikt: ${f.insikt}`);
-  if (f.rotorsak) rader.push(`- Trolig orsak: ${f.rotorsak}`);
-  rader.push(`- Belägg: ${f.belagg_typ} på ${f.belagg_url}`);
-  rader.push(`- Värde: \`${f.belagg_varde.replace(/`/g, "'")}\``);
-  if (f.belagg2_varde) rader.push(`- Andra belägget: ${f.belagg2_typ} på ${f.belagg2_url}, \`${f.belagg2_varde.replace(/`/g, "'")}\``);
-  rader.push(`- Effekt: ${f.effekt}`);
-  rader.push(`- Åtgärd: ${f.atgard}`);
-  if (f.forslag_konkret) rader.push(`- Konkret förslag: ${f.forslag_konkret}`);
-  rader.push(
-    `- Allvar ${f.allvar}, säkerhet ${f.sakerhet.toFixed(2)}, lätt att förklara ${f.latt_att_forklara}. Verifierad med ${f.verifieringsmetod ?? "okänt"}. ${f.verifieringsnot ?? ""}`,
-  );
-  rader.push("");
-  return rader;
+  return r;
 }
 
 export function underlagSokvag(doman: string): string {

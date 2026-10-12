@@ -1,10 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { analysera, upptrappningsSkal, type AnalysAlternativ } from "./analyze/analys.js";
+import { analysera, tjansteomradeFor } from "./analyze/analys.js";
 import type { Analys } from "./analyze/schema.js";
 import { byggSidUnderlag, type Underlag } from "./analyze/underlag.js";
 import { rensaForslag, verifieraFynd, type VerifieringsResultat } from "./analyze/verifiering.js";
-import { konfig } from "./config.js";
 import { hamtaSajt } from "./crawl/hamta.js";
 import type { Db } from "./db/index.js";
 import type { LankKontroll } from "./measure/lankar.js";
@@ -15,7 +14,6 @@ import {
   rensaGranskning,
   sattStatus,
   sattVerifiering,
-  sparaBra,
   sparaFynd,
   sparaMatning,
   sparaSida,
@@ -32,28 +30,28 @@ import { dataMapp, filnamnSaker, skrivJson } from "./util/fil.js";
 import { logg } from "./util/logg.js";
 
 export interface AuditAlternativ {
-  utanModell?: boolean; // hämta och mät men hoppa över analys (för test utan API-nyckel)
+  utanModell?: boolean; // hämta och mät men hoppa över analys
   utanLighthouse?: boolean;
 }
 
 const STOR_ORGANISATION = /presskontakt|pressansvarig|presschef|pressekreterare|presstj[aä]nst|kommunikationschef|kommunikationsavdelning|kommunikationsdirekt[oö]r|kommunikationsenhet|marknadschef|head of communications|press officer/i;
 const PARKERAD = /domain is parked|parkerad dom[aä]n|k[oö]p denna dom[aä]n|this domain (is|may be) for sale|dom[aä]nen [aä]r till salu|under construction|under uppbyggnad|kommer snart|coming soon|website coming soon|sidan [aä]r inte tillg[aä]nglig|account suspended|403 forbidden|index of \//i;
 
-/** Hela granskningen för ett prospekt: kvalificering, hämtning, mätning, analys, verifiering och rapport. */
+/** Hela granskningen för ett prospekt via API: kvalificering, hämtning, mätning, analys, verifiering och rapport. Används inte i driften. */
 export async function granskaProspekt(d: Db, p: Prospekt, alt: AuditAlternativ = {}): Promise<"granskad" | "hoppad" | "fel"> {
   const h = await hamtaOchMat(d, p, alt);
   if (h.typ === "hoppad") return "hoppad";
   const { underlag, lankar } = h;
 
   if (alt.utanModell) {
-    const rapport = skrivRapport(d, p.id, underlag, "Analys med språkmodell hoppades över (--utan-modell).", false);
+    const rapport = skrivRapport(d, p.id, underlag, false);
     sattStatus(d, p.id, "kvalificerad");
     logg.info(`   rapport utan analys: ${rapport}`);
     return "granskad";
   }
 
-  const { utfall, upptrappad } = await analysMedUpptrappning(d, p, underlag, lankar);
-  avslutaGranskning(d, p, underlag, utfall.analys, utfall.bekraftade, upptrappad);
+  const utfall = await analyseraOchVerifiera(d, p, underlag, lankar);
+  avslutaGranskning(d, p, underlag, utfall.analys, utfall.bekraftade);
   return "granskad";
 }
 
@@ -172,11 +170,11 @@ export async function hamtaOchMat(d: Db, p: Prospekt, alt: AuditAlternativ = {})
 }
 
 /** Avslutar granskningen: rapport, status granskad, händelse och loggrad. */
-export function avslutaGranskning(d: Db, p: Prospekt, underlag: Underlag, analys: Analys, bekraftade: number, upptrappad: string | null): string {
-  const rapport = skrivRapport(d, p.id, underlag, analys.sammanfattning, analys.valskott);
+export function avslutaGranskning(d: Db, p: Prospekt, underlag: Underlag, analys: Analys, bekraftade: number): string {
+  const rapport = skrivRapport(d, p.id, underlag, analys.valskott);
   sattStatus(d, p.id, "granskad");
-  loggaHandelse(d, p.id, "granskad", { fynd: analys.fynd.length, bekraftade, valskott: analys.valskott, huvudinsikt: !!analys.huvudinsikt, upptrappad });
-  logg.info(`   ${bekraftade} av ${analys.fynd.length} fynd bekräftade. ${analys.huvudinsikt ? "Huvudinsikt finns." : "Ingen huvudinsikt."} Rapport: ${rapport}`);
+  loggaHandelse(d, p.id, "granskad", { fynd: analys.fynd.length, bekraftade, valskott: analys.valskott });
+  logg.info(`   ${bekraftade} av ${analys.fynd.length} fynd bekräftade.${analys.valskott ? " Sajten bedöms som välskött." : ""} Rapport: ${rapport}`);
   return rapport;
 }
 
@@ -184,60 +182,35 @@ export interface AnalysUtfall {
   analys: Analys;
   bekraftade: number;
   bekraftadeIds: Set<string>;
-  djup3Bekraftat: boolean;
 }
 
-/**
- * Analys och verifiering, med upptrappning till MODEL_UPPTRAPPNING om UPPTRAPPNING är satt och den första
- * analysen saknar huvudinsikt, saknar bekräftat fynd med djup 3 eller får färre än tre fynd bekräftade.
- * Varje upptrappning loggas som händelsen upptrappning. Returnerar skälet om den trappades upp.
- */
-export async function analysMedUpptrappning(d: Db, p: Prospekt, underlag: Underlag, lankar: LankKontroll[]): Promise<{ utfall: AnalysUtfall; upptrappad: string | null }> {
-  const k = konfig();
-  let utfall = await analyseraOchVerifiera(d, p, underlag, lankar);
-  const skal = upptrappningsSkal({ huvudinsikt: !!utfall.analys.huvudinsikt, bekraftade: utfall.bekraftade, djup3Bekraftat: utfall.djup3Bekraftat });
-  if (!skal || !k.UPPTRAPPNING || k.MODEL_UPPTRAPPNING === k.MODEL_ANALYS) return { utfall, upptrappad: null };
-
-  logg.info(`   trappar upp till ${k.MODEL_UPPTRAPPNING}: ${skal}`);
-  loggaHandelse(d, p.id, "upptrappning", { skal, fran: k.MODEL_ANALYS, till: k.MODEL_UPPTRAPPNING, bekraftade: utfall.bekraftade, fynd: utfall.analys.fynd.length });
-  d.prepare("DELETE FROM fynd WHERE prospekt_id = ?").run(p.id);
-  d.prepare("DELETE FROM bra WHERE prospekt_id = ?").run(p.id);
-  utfall = await analyseraOchVerifiera(d, p, underlag, lankar, { modell: k.MODEL_UPPTRAPPNING, steg: "analys_upptrappning" });
-  return { utfall, upptrappad: skal };
-}
-
-/**
- * Analyserar med modellen, sparar profil, bra och fynd, verifierar varje fynd mot rådata och stryker
- * huvudinsikten om färre än två av dess fynd bekräftas.
- */
-export async function analyseraOchVerifiera(d: Db, p: Prospekt, underlag: Underlag, lankar: LankKontroll[], alt: AnalysAlternativ = {}): Promise<AnalysUtfall> {
-  logg.steg(`analyserar med språkmodell${alt.modell ? ` (${alt.modell})` : ""}`);
-  const analys = await analysera(d, p.id, underlag, alt);
+/** Analyserar med modellen via API, sparar profil och fynd och verifierar varje fynd mot rådata. Används inte i driften. */
+export async function analyseraOchVerifiera(d: Db, p: Prospekt, underlag: Underlag, lankar: LankKontroll[]): Promise<AnalysUtfall> {
+  logg.steg("analyserar med språkmodell");
+  const analys = await analysera(d, p.id, underlag);
   for (const rad of rensaForslag(underlag, analys.fynd)) logg.info(`   ${rad}`);
   const radIds = sparaAnalys(d, p, analys);
 
-  // Verifiering
   logg.steg(`verifierar ${analys.fynd.length} fynd`);
   const resultat = new Map<string, VerifieringsResultat>();
   for (const f of analys.fynd) {
     try {
       resultat.set(f.id, await verifieraFynd(d, p.id, underlag, f, lankar));
     } catch (e) {
-      resultat.set(f.id, { verifierad: false, metod: "ingen", not: `Verifieringen misslyckades: ${e instanceof Error ? e.message : String(e)}` });
+      resultat.set(f.id, { verifierad: false, metod: "ingen", not: `Verifieringen misslyckades: ${e instanceof Error ? e.message : String(e)}`, gallerInte: null });
     }
   }
   return tillampaVerifiering(d, p, analys, radIds, resultat);
 }
 
-/** Sparar analysens profil, bra och fynd i databasen. Returnerar radnummer per fynd-id. */
+/** Sparar analysens profil och fynd i databasen. Returnerar radnummer per fynd-id. Kolumner från den fördjupade analysen får neutrala värden. */
 export function sparaAnalys(d: Db, p: Prospekt, analys: Analys): Map<string, number> {
   uppdateraProspekt(d, p.id, {
     organisationstyp: analys.organisationstyp,
     namn: p.namn ?? analys.organisationsnamn ?? null,
-    profil: JSON.stringify({ ...analys.profil, borja_med: analys.borja_med }),
-    huvudinsikt: analys.huvudinsikt ? JSON.stringify(analys.huvudinsikt) : null,
+    profil: JSON.stringify(analys.profil),
+    huvudinsikt: null,
   });
-  for (const b of analys.bra) sparaBra(d, p.id, b.text, b.url);
   const radIds = new Map<string, number>();
   for (const f of analys.fynd) {
     radIds.set(
@@ -246,65 +219,49 @@ export function sparaAnalys(d: Db, p: Prospekt, analys: Analys): Map<string, num
         prospekt_id: p.id,
         fynd_id: f.id,
         omrade: f.omrade,
-        tjansteomrade: f.tjansteomrade,
+        tjansteomrade: tjansteomradeFor(f.omrade),
         rubrik: f.rubrik,
         observation: f.observation,
         belagg_url: f.belagg.url,
         belagg_typ: f.belagg.typ,
         belagg_varde: f.belagg.varde,
         effekt: f.effekt,
-        atgard: f.atgard,
+        atgard: "",
         allvar: f.allvar,
-        sakerhet: f.sakerhet,
-        latt_att_forklara: f.latt_att_forklara,
-        djup: f.djup,
-        insikt: f.insikt,
-        rotorsak: f.rotorsak,
+        sakerhet: 1,
+        latt_att_forklara: 2,
+        djup: 1,
+        insikt: null,
+        rotorsak: null,
         forslag_konkret: f.forslag_konkret,
-        insats: f.insats,
-        kopplar_till_syfte: f.kopplar_till_syfte ? 1 : 0,
-        belagg2_url: f.belagg2?.url ?? null,
-        belagg2_typ: f.belagg2?.typ ?? null,
-        belagg2_varde: f.belagg2?.varde ?? null,
+        insats: null,
+        kopplar_till_syfte: 1,
+        belagg2_url: null,
+        belagg2_typ: null,
+        belagg2_varde: null,
+        galler_inte: null,
       }),
     );
   }
   return radIds;
 }
 
-/**
- * Skriver verifieringens utfall per fynd, loggar och stryker huvudinsikten om färre än två av dess fynd bekräftades.
- * Fynd utan resultat räknas som inte kontrollerade.
- */
+/** Skriver verifieringens utfall per fynd, med galler_inte, och loggar. Fynd utan resultat räknas som inte kontrollerade. */
 export function tillampaVerifiering(d: Db, p: Prospekt, analys: Analys, radIds: Map<string, number>, resultat: Map<string, VerifieringsResultat>): AnalysUtfall {
   let bekraftade = 0;
-  let djup3Bekraftat = false;
   const bekraftadeIds = new Set<string>();
   for (const f of analys.fynd) {
-    const v = resultat.get(f.id) ?? { verifierad: false, metod: "ingen" as const, not: "Ingen kontroll kunde göras." };
+    const v = resultat.get(f.id) ?? { verifierad: false, metod: "ingen" as const, not: "Ingen kontroll kunde göras.", gallerInte: null };
     const radId = radIds.get(f.id);
-    if (radId !== undefined) sattVerifiering(d, radId, v.verifierad, v.metod, v.not);
+    if (radId !== undefined) sattVerifiering(d, radId, v.verifierad, v.metod, v.not, v.gallerInte);
     if (v.verifierad) {
       bekraftade++;
       bekraftadeIds.add(f.id);
-      if (f.djup === 3) djup3Bekraftat = true;
     }
-    logg.info(`   ${v.verifierad ? "ok " : "nej"}  ${f.id} ${f.omrade} djup ${f.djup}  ${f.rubrik}  [${v.metod}] ${v.verifierad ? "" : v.not}`);
+    logg.info(`   ${v.verifierad ? "ok " : "nej"}  ${f.id} ${f.omrade} allvar ${f.allvar}  ${f.rubrik}  [${v.metod}] ${v.verifierad ? (v.gallerInte ? `delvis, gäller inte: ${v.gallerInte}` : "") : v.not}`);
   }
-
-  // Huvudinsikten håller bara om minst två av dess fynd bekräftades
-  if (analys.huvudinsikt) {
-    const kvar = analys.huvudinsikt.fynd_ids.filter((id) => bekraftadeIds.has(id));
-    if (kvar.length < 2) {
-      logg.info(`   huvudinsikten stryks: bara ${kvar.length} av dess fynd bekräftades`);
-      uppdateraProspekt(d, p.id, { huvudinsikt: null });
-      analys.huvudinsikt = null;
-    } else {
-      analys.huvudinsikt.fynd_ids = kvar;
-      uppdateraProspekt(d, p.id, { huvudinsikt: JSON.stringify(analys.huvudinsikt) });
-    }
-  }
-  return { analys, bekraftade, bekraftadeIds, djup3Bekraftat };
+  void p;
+  return { analys, bekraftade, bekraftadeIds };
 }
 
 function hoppaMed(d: Db, p: Prospekt, orsak: string): HamtningsUtfall {
