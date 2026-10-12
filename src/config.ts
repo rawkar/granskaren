@@ -11,19 +11,19 @@ export const DATA_DIR = process.env.GRANSKAREN_DATA ? path.resolve(process.env.G
 export const PROMPT_DIR = path.join(ROT, "prompts");
 
 /**
- * Läser .env utan att skriva över variabler som redan finns i miljön. Med MODELLVAG=session (i miljön eller i
- * .env) läses ANTHROPIC_API_KEY aldrig in: modellstegen görs då av underagenter i en session, inte via API.
+ * Läser .env utan att skriva över variabler som redan finns i miljön. Driften går bara via sessionen (granskaren
+ * pass och /dagens). ANTHROPIC_API_KEY läses aldrig in och tas bort ur miljön om inte TILLAT_API=true är satt.
  */
 function lasEnv(): void {
   const fil = path.join(ROT, ".env");
   if (!fs.existsSync(fil)) return;
   const parsed = dotenv.parse(fs.readFileSync(fil, "utf8"));
-  const modellvag = process.env.MODELLVAG ?? parsed.MODELLVAG ?? "api";
+  const tillatApi = (process.env.TILLAT_API ?? parsed.TILLAT_API ?? "false").trim().toLowerCase() === "true";
   for (const [kk, v] of Object.entries(parsed)) {
-    if (kk === "ANTHROPIC_API_KEY" && modellvag.trim() === "session") continue;
+    if (kk === "ANTHROPIC_API_KEY" && !tillatApi) continue;
     if (process.env[kk] === undefined) process.env[kk] = v;
   }
-  if (modellvag.trim() === "session") delete process.env.ANTHROPIC_API_KEY;
+  if (!tillatApi) delete process.env.ANTHROPIC_API_KEY;
 }
 lasEnv();
 
@@ -57,8 +57,10 @@ const belopp = (standard: number) =>
 
 const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(""),
-  /** api: modellstegen går via Anthropic-API:et. session: de görs av underagenter i en Claude-session (granskaren pass), nyckeln läses inte in. */
-  MODELLVAG: z.enum(["api", "session"]).optional().default("api"),
+  /** false: API-klienten vägrar starta och nyckeln läses aldrig in. Driften går via sessionen. true bara för ett medvetet undantag. */
+  TILLAT_API: bool,
+  /** session: modellstegen görs av underagenter i en Claude-session (granskaren pass). api: via Anthropic-API:et, kräver TILLAT_API=true. */
+  MODELLVAG: z.enum(["api", "session"]).optional().default("session"),
   /** Analys, utkast, segment och likhetsprofil. */
   MODEL_ANALYS: z.string().min(1, "MODEL_ANALYS saknas i .env"),
   /** Verifiering, förfilter och grind. */
@@ -106,8 +108,6 @@ const schema = z.object({
   AMNESMALL: z.string().optional().default("Några förslag för {domän}"),
 
   SANDLAGE: z.enum(["granska", "auto"]).optional().default("granska"),
-  /** true gör att den schemalagda API-körningen (run) avslutar direkt. Sätts den dag ett pass körs i stället. */
-  RUN_PAUSAD: bool,
   /** true pausar alla utskick: köade mejl ligger kvar tills Rawaz släpper dem. */
   SAND_PAUSAD: bool,
   TORRKORNING: bool,

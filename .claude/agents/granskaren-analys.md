@@ -1,7 +1,7 @@
 ---
 name: granskaren-analys
 description: Analyserar en webbplats för Granskaren utifrån ett arbetspaket och skriver analys.json. Används bara av /dagens.
-model: opus
+model: claude-opus-5-5
 tools: Read, Write
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: granskaren-utkast
 description: Skriver mejlutkastet för Granskaren utifrån ett arbetspaket och skriver utkast.json. Används bara av /dagens.
-model: opus
+model: claude-opus-5-5
 tools: Read, Write
 ---
 

@@ -70,8 +70,8 @@ export async function run(d: Db, alt: RunAlternativ = {}): Promise<void> {
 
 async function runInre(d: Db, alt: RunAlternativ): Promise<void> {
   const k = konfig();
-  if (k.RUN_PAUSAD) {
-    logg.varning("RUN_PAUSAD=true i .env: API-körningen är pausad, dagens pass görs i en session med /dagens. Inget görs.");
+  if (!k.TILLAT_API) {
+    logg.varning("TILLAT_API=false i .env: run går via API:et och används inte längre. Dagens pass görs i en session med /dagens. Inget görs.");
     return;
   }
   logg.info(`run startar. Läge ${k.SANDLAGE}, torrkörning ${k.TORRKORNING ? "PÅ" : "av"}, tak ${k.MAX_MEJL_PER_DAG} per dag, fönster ${k.SANDFONSTER_START} till ${k.SANDFONSTER_SLUT}, paus ${k.PAUS_MIN_MINUTER} till ${k.PAUS_MAX_MINUTER} minuter.`);

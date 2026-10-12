@@ -33,6 +33,7 @@ import {
   verifieringIn,
 } from "./pass/pass.js";
 import { kvotEfter, kvotFore, kvotSammanfattning, kvotSnitt, lasKvotLogg } from "./pass/kvot.js";
+import { kontrolleraModell, MODELL_PER_STEG } from "./pass/modell.js";
 import { run } from "./run.js";
 import { normaliseraDoman } from "./util/domain.js";
 import { logg } from "./util/logg.js";
@@ -267,7 +268,7 @@ const pass = program
 
 function passStart(): { d: ReturnType<typeof db>; datum: string } {
   const k = konfig();
-  if (k.MODELLVAG !== "session") logg.varning("MODELLVAG är inte session: API-nyckeln är inläst i miljön. Kör passet med MODELLVAG=session.");
+  if (k.TILLAT_API || process.env.ANTHROPIC_API_KEY) logg.varning("TILLAT_API är true eller API-nyckeln finns i miljön. Passet ska köras utan API: sätt TILLAT_API=false i .env.");
   return { d: db(), datum: "" };
 }
 
@@ -417,10 +418,21 @@ pass
     const nyckel = process.env.ANTHROPIC_API_KEY ? "INLÄST" : "inte inläst";
     if (o.sedan) {
       const r = apiAnvandningSedan(d, Number.parseInt(o.sedan, 10));
-      console.log(`MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. API-anrop loggade efter rad ${o.sedan}: ${r.anrop} (${r.usd.toFixed(4)} USD).`);
+      console.log(`TILLAT_API=${k.TILLAT_API}, MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. API-anrop loggade efter rad ${o.sedan}: ${r.anrop} (${r.usd.toFixed(4)} USD).`);
       return;
     }
-    console.log(`MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. Senaste kostnadsrad: ${senasteKostnadId(d)}.`);
+    console.log(`TILLAT_API=${k.TILLAT_API}, MODELLVAG=${k.MODELLVAG}, ANTHROPIC_API_KEY ${nyckel}. Senaste kostnadsrad: ${senasteKostnadId(d)}.`);
+  });
+
+pass
+  .command("modellkontroll")
+  .description("Läser ur underagentens transkript vilken modell som faktiskt kördes och jämför med den som steget kräver. Avviker den ska passet avbrytas")
+  .requiredOption("--steg <steg>", `ett av ${Object.keys(MODELL_PER_STEG).join(", ")}`)
+  .requiredOption("--agent <id>", "agentens id från Agent-verktygets svar")
+  .action((o: { steg: string; agent: string }) => {
+    const r = kontrolleraModell(o.steg, o.agent);
+    console.log(`MODELL ${r.ok ? "ok" : "avvikelse"} ${r.steg}  ${r.meddelande}`);
+    if (!r.ok) process.exitCode = 3;
   });
 
 pass
