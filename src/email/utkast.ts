@@ -48,13 +48,13 @@ export function sattIhop(brodtext: string, tilltal: Tilltal = "ni"): string {
 export type SparadProfil = { person?: Profil["person"]; vad_de_gor?: unknown; huvudhandling?: unknown } & Record<string, unknown>;
 
 /**
- * Tilltal och förnamn. Kundtypen styr när den finns: kundtyp 1 får förnamn och du, övriga ni.
- * Saknas kundtyp avgör profilen: du bara när personen är namngiven med rimlig säkerhet.
+ * Tilltal och förnamn. Kundtypen styr när den finns: kundtyp 1 får förnamn och du när ett förnamn finns, annars ni
+ * (ett bolag utan namngiven person hälsas med Hej). Övriga kundtyper får ni. Saknas kundtyp avgör profilen.
  */
 export function tilltalFor(profil: SparadProfil | null, kundtyp: number | null = null): { tilltal: Tilltal; fornamn: string | null } {
   const p = profil?.person;
   const fornamn = p?.fornamn ? p.fornamn.trim().split(/\s+/)[0] : null;
-  if (kundtyp === 1) return { tilltal: "du", fornamn };
+  if (kundtyp === 1) return fornamn ? { tilltal: "du", fornamn } : { tilltal: "ni", fornamn: null };
   if (kundtyp !== null && kundtyp > 1) return { tilltal: "ni", fornamn: null };
   if (p && p.drivs_av_namngiven_person && fornamn && p.sakerhet >= 0.7) return { tilltal: "du", fornamn };
   return { tilltal: "ni", fornamn: null };

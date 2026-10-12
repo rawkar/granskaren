@@ -96,6 +96,6 @@ describe("tilltal per kundtyp", () => {
   it("utan kundtyp avgör profilen", () => {
     expect(tilltalFor(profil, null)).toEqual({ tilltal: "du", fornamn: "Pernilla" });
     expect(tilltalFor(null, null)).toEqual({ tilltal: "ni", fornamn: null });
-    expect(tilltalFor(null, 1)).toEqual({ tilltal: "du", fornamn: null });
+    expect(tilltalFor(null, 1)).toEqual({ tilltal: "ni", fornamn: null });
   });
 });
