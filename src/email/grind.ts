@@ -70,7 +70,8 @@ export function sprakfel(amne: string, brodtext: string, bokningslank: string, t
   if (amne.length > MAX_AMNE) fel.push(`ämnesraden är ${amne.length} tecken, högst ${MAX_AMNE}`);
   if (amne.length < 10) fel.push("ämnesraden är för kort");
   if (amne === amne.toUpperCase() && /[A-ZÅÄÖ]/.test(amne)) fel.push("ämnesraden är skriven med versaler");
-  const lankar = [...brodtext.matchAll(/(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(\/\S*)?/gi)]
+  // Toppdomänen måste vara bokstäver, så att klockslag som kl.10.00-14.00 inte räknas som länkar
+  const lankar = [...brodtext.matchAll(/(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})(\/\S*)?/gi)]
     .map((m) => m[0].toLowerCase().replace(/[.,;:)]+$/, ""))
     .filter((l) => !/@/.test(l));
   const tillatna = ["rkkommunikation.se"];

@@ -39,6 +39,18 @@ describe("1. falskt larm: beskrivningar av vad som saknas är tillåtna", () => 
   });
 });
 
+describe("klockslag är inte länkar", () => {
+  it("släpper igenom kl.10.00-14.00 men stoppar riktiga främmande länkar", () => {
+    const text = `${inledning}
+
+Telefontiden är kl.10.00-14.00 och kl.8.00-11.30 på fredagar.
+
+rkkommunikation.se`;
+    expect(sprakfel("Ämne", text, "", undefined, [], 400).filter((f) => /otillåten länk/.test(f))).toEqual([]);
+    expect(sprakfel("Ämne", `${text} Se annan.se/sida.`, "", undefined, [], 400)).toContainEqual(expect.stringMatching(/otillåten länk: annan.se/sida/));
+  });
+});
+
 describe("2. påståenden om hur besökare beter sig", () => {
   it("stoppar aldrig och alltid i meningar om besökare", () => {
     expect(tvarsakerhetsfel(["Få som jämför verkstäder i Södertälje klickar sig fram dit, så fördelarna når dem aldrig."])).toHaveLength(1);
