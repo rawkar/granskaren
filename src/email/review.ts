@@ -21,6 +21,74 @@ interface MejlRad {
   status: string;
 }
 
+export interface KoRad extends MejlRad {
+  doman: string;
+  kundtyp: number | null;
+  skapad: string;
+}
+
+/** Mejlen i granskningskön (status i_granskning eller utkast) med domän och kundtyp, äldst först. */
+export function granskningsko(d: Db): KoRad[] {
+  return d
+    .prepare(
+      `SELECT m.*, p.doman, p.kundtyp FROM mejl m JOIN prospekt p ON p.id = m.prospekt_id
+       WHERE m.typ = 'forsta' AND m.status IN ('i_granskning', 'utkast') ORDER BY m.id`,
+    )
+    .all() as KoRad[];
+}
+
+/** Skriver ut granskningskön i sin helhet, ett mejl i taget med mottagare och ämnesrad, så att Rawaz kan läsa dem i sessionen. */
+export function skrivGranskningsko(d: Db): number {
+  const ko = granskningsko(d);
+  if (ko.length === 0) {
+    console.log("Granskningskön är tom.");
+    return 0;
+  }
+  for (const m of ko) {
+    console.log(`\n${"=".repeat(78)}\n${m.doman}   mejl #${m.id}   kundtyp ${m.kundtyp ?? "?"}   status ${m.status}   skapat ${m.skapad}`);
+    console.log(`Till: ${m.mottagare ?? "(saknas)"}\nÄmne: ${m.amne}\n\n${m.text}`);
+  }
+  const koade = (d.prepare("SELECT count(*) AS n FROM mejl WHERE typ = 'forsta' AND status = 'koad'").get() as { n: number }).n;
+  console.log(`\n${ko.length} mejl i granskningskön, ${koade} köade för utskick. Godkänn med: granskaren review --godkann <id...>`);
+  return ko.length;
+}
+
+/** Godkänner mejl i granskningskön efter id: mejlet och prospektet får status koad. Mejl som inte ligger i kön rörs inte. */
+export function godkann(d: Db, ids: number[], not?: string): { koade: number[]; hoppade: number[] } {
+  const koade: number[] = [];
+  const hoppade: number[] = [];
+  for (const id of ids) {
+    const m = d.prepare("SELECT id, prospekt_id FROM mejl WHERE id = ? AND status IN ('i_granskning', 'utkast')").get(id) as { id: number; prospekt_id: number } | undefined;
+    if (!m) {
+      hoppade.push(id);
+      continue;
+    }
+    d.prepare("UPDATE mejl SET status = 'koad' WHERE id = ?").run(m.id);
+    sattStatus(d, m.prospekt_id, "koad");
+    loggaHandelse(d, m.prospekt_id, "godkant_i_review", not);
+    koade.push(id);
+  }
+  return { koade, hoppade };
+}
+
+/** Kastar mejl i granskningskön efter id: mejlet får status kastad och prospektet är kvar som granskat. */
+export function kasta(d: Db, ids: number[], orsak?: string): { kastade: number[]; hoppade: number[] } {
+  const kastade: number[] = [];
+  const hoppade: number[] = [];
+  for (const id of ids) {
+    const m = d.prepare("SELECT id, prospekt_id FROM mejl WHERE id = ? AND status IN ('i_granskning', 'utkast')").get(id) as { id: number; prospekt_id: number } | undefined;
+    if (!m) {
+      hoppade.push(id);
+      continue;
+    }
+    d.prepare("UPDATE mejl SET status = 'kastad' WHERE id = ?").run(m.id);
+    sattStatus(d, m.prospekt_id, "granskad");
+    loggaHandelse(d, m.prospekt_id, "kastat_i_review", orsak);
+    kastade.push(id);
+  }
+  return { kastade, hoppade };
+}
+
 /** Går igenom granskningskön, ett utkast i taget. Godkänn, redigera eller kasta. */
 export async function review(d: Db): Promise<void> {
   const ko = d.prepare("SELECT * FROM mejl WHERE status IN ('i_granskning', 'utkast') ORDER BY id").all() as MejlRad[];
@@ -82,9 +150,7 @@ export async function review(d: Db): Promise<void> {
       while (!klar) {
         const svar = (await rl.question("[g]odkänn  [r]edigera  [k]asta  [h]oppa över  [a]vsluta > ")).trim().toLowerCase();
         if (svar === "g") {
-          d.prepare("UPDATE mejl SET status = 'koad' WHERE id = ?").run(m.id);
-          sattStatus(d, p.id, "koad");
-          loggaHandelse(d, p.id, "godkant_i_review");
+          godkann(d, [m.id]);
           console.log("Köat för utskick.");
           klar = true;
         } else if (svar === "r") {
@@ -101,9 +167,7 @@ export async function review(d: Db): Promise<void> {
           loggaHandelse(d, p.id, "redigerat_i_review");
           console.log(`\nÄmne: ${m.amne}\n\n${m.text}`);
         } else if (svar === "k") {
-          d.prepare("UPDATE mejl SET status = 'kastad' WHERE id = ?").run(m.id);
-          sattStatus(d, p.id, "granskad");
-          loggaHandelse(d, p.id, "kastat_i_review");
+          kasta(d, [m.id]);
           console.log("Kastat. Prospektet är kvar som granskat.");
           klar = true;
         } else if (svar === "h") {

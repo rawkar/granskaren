@@ -7,7 +7,7 @@ import { db } from "./db/index.js";
 import { allaProspekt, hamtaProspektViaDoman, kostnadDennaManad, laggTillSparr, loggaHandelse, prospektMedStatus, sattStatus } from "./db/fragor.js";
 import { importeraFil } from "./discover/import.js";
 import { rapportSokvag } from "./report/rapport.js";
-import { review } from "./email/review.js";
+import { godkann, granskningsko, kasta, review, skrivGranskningsko } from "./email/review.js";
 import { skapaUtkast } from "./email/utkast.js";
 import { skickadeMejl, skickaKoade, skickaTest } from "./email/skicka.js";
 import { profileraForebilder } from "./discover/forebilder.js";
@@ -158,10 +158,36 @@ program
 
 program
   .command("review")
-  .description("Går igenom granskningskön, ett utkast i taget")
-  .action(async () => {
+  .description("Går igenom granskningskön, ett utkast i taget. Med --lista, --godkann eller --kasta sköts kön utan frågor, till exempel i en session")
+  .option("--lista", "skriv ut alla mejl i granskningskön i sin helhet, med mottagare och ämnesrad", false)
+  .option("--godkann <id...>", "köa de här mejlen för utskick")
+  .option("--kasta <id...>", "kasta de här mejlen, prospekten blir kvar som granskade")
+  .option("--orsak <text>", "not som sparas i händelseloggen vid godkännande eller kastning")
+  .action(async (o: { lista: boolean; godkann?: string[]; kasta?: string[]; orsak?: string }) => {
     konfig();
-    await review(db());
+    const d = db();
+    const ids = (lista?: string[]) => (lista ?? []).map((s) => Number.parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0);
+    if (o.lista) {
+      skrivGranskningsko(d);
+      return;
+    }
+    if (o.godkann || o.kasta) {
+      if (o.kasta) {
+        const r = kasta(d, ids(o.kasta), o.orsak);
+        for (const id of r.kastade) logg.info(`mejl ${id}: kastat`);
+        for (const id of r.hoppade) logg.varning(`mejl ${id}: inte i granskningskön, rörs inte`);
+      }
+      if (o.godkann) {
+        const r = godkann(d, ids(o.godkann), o.orsak);
+        for (const id of r.koade) logg.info(`mejl ${id}: köat för utskick`);
+        for (const id of r.hoppade) logg.varning(`mejl ${id}: inte i granskningskön, rörs inte`);
+      }
+      const kvar = granskningsko(d).length;
+      const koade = (d.prepare("SELECT count(*) AS n FROM mejl WHERE typ = 'forsta' AND status = 'koad'").get() as { n: number }).n;
+      logg.info(`Granskningskön: ${kvar}. Köade för utskick: ${koade}.`);
+      return;
+    }
+    await review(d);
   });
 
 program
