@@ -29,7 +29,7 @@ const TILLATNA_EGENNAMN = new Set(
 /** Tidsuttryck som måste finnas i källorna. */
 const TIDSUTTRYCK = [
   "i höst", "i vår", "i sommar", "i vinter", "höst", "hösten", "vår", "våren", "sommar", "sommaren", "vinter", "vintern", "höstterminen", "vårterminen",
-  "i år", "nästa år", "förra året", "i fjol", "nyligen", "just nu", "denna vecka", "den här veckan", "nästa vecka", "i dag", "idag", "i morgon",
+  "i år", "nästa år", "förra året", "i fjol", "nyligen", "just nu", "denna vecka", "den här veckan", "nästa vecka", "i morgon",
   "januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december",
 ];
 
