@@ -10,7 +10,7 @@ import { profilText, rapportSokvag, underlagSokvag } from "../report/rapport.js"
 import type { Underlag } from "../analyze/underlag.js";
 import { dataMapp, filnamnSaker, lasJson } from "../util/fil.js";
 import { logg } from "../util/logg.js";
-import { byggFaktakallor, medPresentation, PRESENTATION, type Faktakallor } from "./fakta.js";
+import { byggFaktakallor, gallerIntefel, medPresentation, PRESENTATION, type Faktakallor } from "./fakta.js";
 import { byggAmne, kvalitetsgrind, lasForbjudnaFraser, MAX_ORD, MIN_ORD, type Grindresultat, type Tilltal } from "./grind.js";
 import { bastaKontakt, sparaKontakter, utvinnKontakter } from "./kontakter.js";
 import { valjFynd } from "./val.js";
@@ -260,6 +260,14 @@ export function forberedUtkast(d: Db, p: Prospekt, alt: DraftAlternativ = {}): U
   if (val.orsak || !val.huvud) return { typ: "inget_mejl", orsak: val.orsak ?? "inget huvudfynd" };
   const valda = val.fynd;
   const huvudfynd = val.huvud.fynd_id;
+  // Ett konkret förslag som innehåller något verifieringen underkände (galler_inte) kan inte stå i mejlet, så det stryks
+  const gallerInteTexter = valda.map((f) => f.galler_inte);
+  for (const f of valda) {
+    if (f.forslag_konkret && gallerIntefel(f.forslag_konkret, gallerInteTexter).length) {
+      logg.info(`   förslaget på ${f.fynd_id} stryks: innehåller ett påstående som verifieringen underkände`);
+      f.forslag_konkret = null;
+    }
+  }
   const bra = braForProspekt(d, p.id);
 
   // Kontakter
