@@ -93,7 +93,13 @@ Discover görs i sessionen: du söker själv med WebSearch, koden hämtar och ko
 
 ## 4. Utskick
 
-Inget skickas i passet. Med `SANDLAGE=granska` hamnar alla mejl i granskningskön, och `SAND_PAUSAD=true` håller kön stängd tills Rawaz har läst mejlen med `granskaren review` och själv släpper dem.
+Inget skickas i passet. Med `SANDLAGE=granska` hamnar alla mejl i granskningskön. När passet är klart ber Rawaz om mejlen, och då går det så här:
+
+1. `npx tsx src/cli.ts review --lista` skriver ut varje mejl i sin helhet med id, mottagare och ämnesrad. Visa dem för Rawaz som de är och fråga för vart och ett om det ska godkännas, ändras eller kastas. Det här är det enda tillfället då du läser mejltext.
+2. `npx tsx src/cli.ts review --godkann <id...> --orsak "godkänt av Rawaz <datum>"` köar de godkända. `review --kasta <id...> --orsak "<varför>"` kastar. Ett mejl som ska ändras skrivs om i databasen enligt Rawaz anvisning och visas igen innan det godkänns.
+3. `npx tsx src/cli.ts send` skickar de köade mejlen med slumpad paus (PAUS_MIN_MINUTER till PAUS_MAX_MINUTER) inom sändfönstret, högst MAX_MEJL_PER_DAG per dag. Kör det i bakgrunden med loggen till `data/logg/send-<datum>.log` och rapportera när det är klart. Utskicket startas bara när Rawaz säger det.
+
+`SAND_PAUSAD=true` stänger kön helt; då ligger köade mejl kvar tills Rawaz sätter false.
 
 ## 5. Efter passet
 

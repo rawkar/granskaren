@@ -1,8 +1,8 @@
 # Granskaren
 
-Webbgranskning och personlig outreach för RK Kommunikation. Ett lokalt kommandoradsverktyg som hittar webbplatser, granskar dem med en kommunikatörs blick, verifierar varje fynd mot rådata och (från fas 2) skriver ett personligt mejl till organisationen.
+Webbgranskning och personlig outreach för RK Kommunikation. Ett lokalt kommandoradsverktyg som hittar webbplatser hos mindre organisationer, granskar dem med en kommunikatörs blick, verifierar varje fynd mot rådata, skriver ett kort personligt mejl och skickar det när Rawaz har godkänt det.
 
-Det här är fas 1: grund och granskning. Import, hämtning, mätning, analys, verifiering och rapport. Mejl, utskick och svar kommer i senare faser.
+Driften går helt via Claude Code-sessionen på prenumerationen. Inget API används: `TILLAT_API=false` i `.env` gör att API-klienten vägrar starta och att ingen nyckel läses in. Modellstegen görs av underagenter som startas från färdigheten `/dagens`, och verktygets kod gör allt annat: hämtning, mätning, kodkontroller, scheman, databas, kö och utskick.
 
 ## Installation
 
@@ -14,123 +14,117 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Fyll i `.env`. För fas 1 räcker `ANTHROPIC_API_KEY`, `MODEL_ANALYS` och `MODEL_SNABB`. Kontrollera aktuella modellnamn i Anthropics dokumentation innan du väljer. Förslagen i `.env.example` är en starkare modell för analys och en snabbare för enklare klassning.
+Fyll i SMTP-uppgifterna och avsändaren i `.env`. Övriga värden i `.env.example` är driftens aktuella inställningar. `.env` och mappen `data/` ligger i `.gitignore` och ska aldrig checkas in.
 
-`.env` och mappen `data/` ligger i `.gitignore` och ska aldrig checkas in.
+## Så går ett pass
+
+Ett pass körs i en ny Claude Code-session med `/dagens <session kvar> <vecka kvar> [antal sajter]`, där de två första värdena är andelen kvar av femtimmarssessionen och av veckan enligt `/usage`. Passledaren (sessionen) gör inga modellsteg själv utom webbsökningen i discover. Varje modellsteg görs av en underagent med tomt sammanhang som bara får läsa ett arbetspaket och skriva sin resultatfil. Högst två underagenter körs samtidigt.
+
+| Steg | Vem | Vad |
+|---|---|---|
+| `pass forbered --antal N` | kod | Hämtar och mäter sajter med status ny eller kvalificerad och skriver ett arbetspaket per sajt i `data/pass/<datum>/<domän>/`. Egenföretagare (kundtyp 1) ligger sist och får högst var tionde plats. |
+| analys | `granskaren-analys`, claude-opus-5-5 | Tre till fyra fynd med belägg, effekt, allvar och eventuellt ett konkret förslag, plus en kort profil (person, vad de gör, viktigaste handling). Ingen skärmbild, bantat underlag. |
+| `pass analys-in` | kod | Tolkar svaret mot zod-schemat, kontrollerar belägg mot rådata och skriver verifieringspaket för fynd som behöver modellens kontroll. |
+| verifiering | `granskaren-verifiering`, claude-haiku-4-5-20251001 | Bedömer bara fakta: `bekraftat`, `delvis` med `galler_inte` (den del av påståendet som inte håller) eller `fel`. Värdeord och tolkningar är inte skäl att underkänna. |
+| `pass verifiering-in` | kod | Sparar bedömningarna, avslutar granskningen, skriver rapporten och utkastpaketet när minst två fynd är bekräftade. |
+| utkast | `granskaren-utkast`, claude-opus-5-5 | Mejlet. |
+| `pass utkast-in` | kod | Kodgrinden. I läget `granska` sparas godkända utkast direkt i granskningskön. Modellgrinden (`granskaren-grind`) körs bara i läget `auto`. |
+
+Efter varje steg kontrollerar passledaren med `pass modellkontroll --steg <steg>` att underagenten faktiskt kördes på den modell som agentdefinitionen anger. Avviker den avbryts passet. Agentdefinitionerna i `.claude/agents/` har alltid fullständiga modellnamn, aldrig alias.
+
+Tar prospekten slut görs discover i sessionen: `pass discover-paket`, webbsökning eller en katalogsida (`pass discover-katalog --url`), `pass discover-in`, förfilter med `granskaren-forfilter` och `pass forfilter-in`. Katalogsidor som 1177:s kontaktkort och Wikipedias infoboxar ger bättre träffar än webbsökningen.
+
+Efter passet visar `pass status` steg, utfall och tokens per sajt och steg, `pass api-kontroll --sedan <rad>` visar att noll API-anrop gjordes, och `pass kvot --efter <session> --vecka <vecka>` loggar förbrukningen per sajt i `data/jamforelse/kvot-logg.csv` och visar hur många sajter som ryms i en session och hur många pass veckan räcker till.
+
+## Granskning och utskick
+
+Alla mejl hamnar i granskningskön (`SANDLAGE=granska`). Rawaz läser varje mejl och avgör godkänn, ändra eller kasta.
+
+```
+npx tsx src/cli.ts review --lista
+npx tsx src/cli.ts review --godkann 60 61 62 --orsak "godkänt av Rawaz 2026-10-14"
+npx tsx src/cli.ts review --kasta 51 --orsak "samma organisation som agilokliniken.se"
+npx tsx src/cli.ts review
+npx tsx src/cli.ts send
+```
+
+`review --lista` skriver ut alla mejl i kön i sin helhet med id, mottagare och ämnesrad. `--godkann` köar, `--kasta` kastar (prospektet är kvar som granskat). Utan flaggor går `review` igenom kön interaktivt med möjlighet att redigera i textredigeraren. `send` skickar köade mejl på vardagar inom sändfönstret `SANDFONSTER_START` till `SANDFONSTER_SLUT`, högst `MAX_MEJL_PER_DAG` per dag, med en slumpad paus på `PAUS_MIN_MINUTER` till `PAUS_MAX_MINUTER` minuter mellan varje. `SAND_PAUSAD=true` stänger kön helt. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. Ingen schemalagd körning finns; utskicket startas när Rawaz säger det.
+
+Databasen tillåter bara ett förstamejl per domän, så ett utskick kan inte dubbleras.
 
 ## Kommandon
 
-Kör med `npm run granskaren -- <kommando>` eller, efter `npm link`, bara `granskaren <kommando>`.
+Kör med `npx tsx src/cli.ts <kommando>` eller `npm run granskaren -- <kommando>`.
 
 | Kommando | Vad det gör |
 |---|---|
-| `import <fil.csv>` | Läser in en lista. Kolumner: `url` (obligatorisk), `namn`, `bransch`, `ort`, `kommentar`. Domänen normaliseras och dubbletter hoppas över. |
-| `audit [--antal N]` | Granskar sajter med status `ny` eller `kvalificerad`. Standard är 5 åt gången. |
-| `audit --doman exempel.se [--igen]` | Granskar en viss domän. `--igen` tillåter omgranskning. |
-| `audit --utan-modell` | Hämtar och mäter men hoppar över analysen. Bra för att testa utan API-nyckel. |
-| `audit --utan-lighthouse` | Hoppar över Lighthouse. Snabbare. |
-| `draft [--antal N]` | Skriver mejlutkast för granskade sajter. Letar upp mejladress på sajten, väljer två eller tre bekräftade fynd, skriver mejlet och kör kvalitetsgrinden. |
-| `draft --doman exempel.se --test-till du@exempel.se` | Utkast för en viss sajt, adresserat till en testadress i stället för organisationens. |
-| `review` | Går igenom granskningskön, ett utkast i taget. Godkänn, redigera i din textredigerare eller kasta. |
-| `forebilder` | Läser förebilderna i `prompts/kundprofil.md`, profilerar dem en gång (likhetsprofil per kundtyp) och lägger dem på spärrlistan som befintliga kunder. |
-| `segment [--antal N]` | Tar fram kombinationer av yrke eller bransch och ort per kundtyp enligt fördelningen, med likhetsprofilerna som underlag. `--lista` visar befintliga. |
-| `discover [--antal N] [--kalla webb,lankar] [--kundtyp N]` | Hittar nya sajter: webbsökning per segment och utgående länkar från förebildernas sajter (ett steg). Varje träff förfiltreras med kodsignaler och en likhetspoäng mot förebilderna. Godkända blir prospekt med kundtyp. |
-| `weekly [--justera]` | Veckorapport per kundtyp och förslag på ny fördelning utifrån svar. Ingen typ går under minsta andel. |
-| `send [--max N]` | Skickar köade mejl (status `koad`) på vardagar inom sändfönstret, högst `MAX_MEJL_PER_DAG` per dag, med 4 till 15 minuters paus mellan. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. |
-| `send --test-till du@exempel.se [--doman x.se]` | Skickar ett utkast som test till din egen adress. Går runt torrkörning, fönster och tak, men rör inte kön. |
-| `run [--en-gang] [--utan-discover]` | Helautomatisk dag. Skickar nästa köade mejl, fyller på kön genom att granska och skriva utkast för nästa prospekt, letar nya prospekt med discover när inga finns kvar, och pausar slumpat mellan mejlen tills `MAX_MEJL_PER_DAG` är nått eller sändfönstret stänger. |
-| `skickade [--doman x.se]` | Listar mejl som faktiskt har skickats i skarpt läge. Med `--doman` visas hela mejlet. Testmejl och torrkörningar räknas inte. En kopia av varje skickat mejl ligger också i `data/skickade/`. |
+| `pass forbered [--antal N]` | Hämtar, mäter och skriver arbetspaket. |
+| `pass analys-in`, `verifiering-in`, `utkast-paket`, `utkast-in`, `grind-in <domän>` | Läser in underagentens resultatfil, kör kodkontrollerna och säger vilket steg som är nästa (`UTFALL`-raden). |
+| `pass status` | Per sajt: steg, försök, utfall, samt tokens per sajt och steg. |
+| `pass tokens <domän>` | Tokens per steg för en sajt. |
+| `pass modellkontroll --steg <steg>` | Läser underagentens transkript och kontrollerar att rätt modell användes. |
+| `pass kvot --fore/--efter <session> --vecka <vecka>` | Loggar kvotförbrukningen per pass och visar snitt. |
+| `pass api-kontroll [--sedan N]` | Visar att API:t är avstängt och hur många API-anrop som loggats sedan rad N. |
+| `pass discover-paket`, `discover-katalog --url`, `discover-in --segment`, `forfilter-in --segment` | Discover i sessionen, se färdigheten. |
+| `review [--lista] [--godkann id...] [--kasta id...] [--orsak text]` | Granskningskön. |
+| `send [--max N]` | Skickar köade mejl. `send --test-till du@exempel.se [--doman x.se]` skickar ett utkast till din egen adress utan att röra kön. |
+| `skickade [--doman x.se]` | Listar mejl som faktiskt har skickats i skarpt läge. Kopior ligger i `data/skickade/`. |
+| `fordjupa <domän>` och `fordjupa-in <domän>` | Fördjupad analys på begäran, till exempel när en organisation har svarat. Arbetspaket i `data/fordjupning/<domän>/`, rapport i `data/rapporter/<domän>-fordjupning.md`. |
+| `segment --fil <json>` och `segment --lista` | Läser in segment (yrke, ort, sökfras per kundtyp) skrivna i sessionen, eller listar dem. |
+| `forebilder` | Profilerar förebilderna i `prompts/kundprofil.md` och lägger dem på spärrlistan som befintliga kunder. |
+| `import <fil.csv>` | Läser in en lista med kolumnerna `url`, `namn`, `bransch`, `ort`, `kommentar`. |
 | `report <domän>` | Skriver ut rapporten för en sajt. |
-| `status` | Visar prospekt per status, mätpunkter och kostnad. |
+| `status` | Prospekt per status, mätpunkter, kostnad och tokens. |
 | `block <domän eller adress>` | Lägger till på spärrlistan. |
+| `paus [--av]` | Visar eller tar bort kvalitetsvaktens paus. |
 
-Kommandona `send`, `sync`, `followup`, `discover` och `run` tillkommer i fas 3 till 6.
+Kommandona `audit`, `draft`, `discover`, `segment --antal` och `run` är API-vägen från den tidigare driften. De finns kvar för ett medvetet undantag men vägrar köra så länge `TILLAT_API=false`.
 
 ## Så bedömer analysen
 
-Analysen görs i ett enda modellanrop som ger fyra saker i samma svar: en kort profil av organisationen (vad de gör, för vem, sajtens syfte, viktigaste handling), fyra till sex fynd, en huvudinsikt som binder ihop minst två fynd, och tre åtgärder Rawaz skulle börja med. Allt bedöms mot sajtens syfte, inte mot en checklista.
+Ribban är låg med flit: ett mejl skrivs så snart två fynd är bekräftade, oavsett hur djupa de är. Analysen tar fram tre till fyra fynd på startsidan, kontaktsidan och den viktigaste handlingssidan. Varje fynd har område, rubrik, observation, belägg (URL, typ och värde), effekt för besökaren, allvar 1 till 3 och eventuellt ett konkret förslag, till exempel en ny knapptext, som sedan skrivs ordagrant på en egen rad i mejlet.
 
-Varje fynd har ett djup. 1 betyder att ett verktyg hittar det, 2 kräver tolkning av mätdata, 3 kräver omdöme om kommunikationen. Fynd med djup 3 måste ha två belägg som båda håller i verifieringen. Minst ett fynd per sajt har ett konkret förslag, till exempel en ny sidtitel, som sedan skrivs ordagrant på en egen rad i mejlet.
+Siffror som används i fynd och mejl kommer från kodräknade mått i `data/underlag/<domän>.json` under `matt` och från Lighthouse och axe. Modellen räknar aldrig själv och byter aldrig enhet.
 
-Siffror som används i fynd och mejl kommer från kodräknade mått i `data/underlag/<domän>.json` under `matt`: andel vi-ord mot ni-ord, läsbarhetsindex LIX, antal formulärfält per formulär, antal case och plattform. Modellen räknar aldrig själv.
+Verifieringen kontrollerar fakta, inte nivå. Ett fynd är bekräftat när påståendet håller mot rådatan, delvis bekräftat när en del inte håller (den delen sparas som `galler_inte` och får inte användas i mejlet; ett konkret förslag som innehåller den stryks), och fel när påståendet inte stämmer. Fynd om budskap, innehåll, tillit och vägen till handling (område A, C, G och H) går till modellens verifiering; övriga kontrolleras av kod.
 
-Filen `prompts/rawaz-perspektiv.md` är din. Fyll i den med dina principer och vanligaste iakttagelser, så vägs de in i analysen. Den är frivillig och tom från början.
+Filen `prompts/rawaz-perspektiv.md` är din. Fyll i den med dina principer och vanligaste iakttagelser, så vägs de in i analysen.
 
-## Daglig körning utan handpåläggning
+## Mejlet
 
-`bin/kor-dagligen.cmd` startar `run` och skriver loggen till `data/logg/run-<datum>.log`. En uppgift i Windows Schemaläggaren med namnet "Granskaren dagligt utskick" kör skriptet varje vardag 08:30, och även i efterhand om datorn var avstängd då. Datorn måste vara på och du inloggad. Skapa eller återställ uppgiften i PowerShell:
+Mejlet öppnar med det fynd som har högst allvar och tar upp två eller tre fynd. Brödtexten är 110 till 190 ord med målet 150 (`MEJL_ORDMAL`, `MEJL_MAX_ORD`). Varje stycke om ett fynd säger varför det spelar roll för besökaren. Ett exempel skrivs bara när fyndet har ett konkret förslag. Med `MEJL_FLER_FYND=true` lägger programmet in en fast mening ur `prompts/fler-fynd.md` före erbjudandet när det finns bekräftade fynd som inte fick plats; modellen skriver aldrig den meningen själv.
 
-```
-$proj = "C:\sökväg\till\Granskaren"
-$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$proj\bin\kor-dagligen.cmd`"" -WorkingDirectory $proj
-$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 08:30
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 10) -MultipleInstances IgnoreNew -RunOnlyIfNetworkAvailable
-Register-ScheduledTask -TaskName "Granskaren dagligt utskick" -Action $action -Trigger $trigger -Settings $settings -Force
-```
+Ämnesraden skrivs från mallen `AMNESMALL` i `.env`, där `{domän}` byts mot domänen utan www och `{namn}` mot organisationens namn. Blir raden längre än 60 tecken används namnet.
 
-Ta bort den med `Unregister-ScheduledTask -TaskName "Granskaren dagligt utskick"`. Taket per dag, pauserna och sändfönstret styrs i `.env`. För att allt ska gå utan att du godkänner utkast behöver `SANDLAGE=auto` och `MIN_SAKERHET_AUTO` ligga på en nivå som utkasten når, annars hamnar de i granskningskön.
+Tilltalet avgörs i profilen. Drivs sajten av en namngiven person hälsar mejlet med förnamn och säger du, annars ni. En egenföretagare utan känt förnamn tilltalas ni. Mejlet kritiserar aldrig mottagarens formuleringar utan lyfter det som redan är starkt och föreslår en mer framträdande plats. Om mätning skriver mejlet att inget mätverktyg syns på sidan, aldrig att mätning saknas. Signaturen byggs från `AVSANDARE_*` i `.env`; telefonnumret visas på egen rad när det är ifyllt.
 
-## Mejlutkast och kvalitetsgrind
-
-Ämnesraden skrivs inte av modellen utan från mallen `AMNESMALL` i `.env`, där `{domän}` byts mot domänen utan www och `{namn}` mot organisationens namn. Blir raden längre än 60 tecken används namnet i stället för domänen.
-
-Tilltalet avgörs i profilen. Drivs sajten av en namngiven person (jagform, personnamn i rubrik eller kontakt) hälsar mejlet med förnamn och säger du, annars ni. En enskild konsult kallas aldrig byrå. Mejlet kritiserar aldrig mottagarens formuleringar utan lyfter det som redan är starkt och föreslår en mer framträdande plats, och varje stycke om ett fynd slutar med vad mottagaren vinner eller ett förslag.
-
-Mejlet byggs kring huvudinsikten med två eller tre fynd som stöder den. Minst ett fynd har djup 3, högst ett har djup 1, och minst ett har ett konkret förslag. Brödtexten är 150 till 220 ord. Saknas huvudinsikt eller fynd med djup 3 skrivs inget mejl, och sajten läggs i granskningskön tillsammans med rapporten så att du kan avgöra själv. Om mätning skriver mejlet alltid att inget mätverktyg syns på sidan, aldrig att mätning saknas.
-
-`draft` sparar utkastet i databasen och som fil i `data/utkast/<domän>.txt`. Kvalitetsgrinden kontrollerar med kod det som går (tankstreck, kolon, utropstecken, längd, ämnesradens längd, otillåtna länkar, du-tilltal, fyndens djup, att det konkreta förslaget står på en egen rad och att varje siffra i mejlet finns i fynden) och låter den snabba modellen kontrollera att varje påstående om sajten har stöd i ett bekräftat fynd. Utkast som stoppas får status `utkast` och syns i `review` tillsammans med orsaken. I läget `granska` hamnar alla godkända utkast i granskningskön. I läget `auto` köas utkast med säkerhet över `MIN_SAKERHET_AUTO` direkt för utskick.
-
-Prompten för mejlet ligger i `prompts/mejl.md` och prompten för påståendekontrollen i `prompts/grind.md`. Signaturen byggs från `AVSANDARE_*` i `.env`.
+Kodgrinden kontrollerar tankstreck, kolon, utropstecken, längd, ämnesradens längd, otillåtna länkar (klockslag räknas inte som länkar), tilltal, rytm (korta meningar, högst fyra meningar per stycke), tvärsäkra ord, att huvudpoängen kommer först, att exemplet står på egen rad bara när ett förslag finns, att varje siffra i mejlet finns i fynden och att inget ur `galler_inte` används. Promptarna ligger i `prompts/mejl.md`, `prompts/grind.md` och `prompts/fler-fynd.md`.
 
 Sajter där ingen mejladress hittas markeras `endast_formular` och får inget utkast. Verktyget fyller aldrig i formulär.
 
-## En första körning
+## Målgrupp och discover
 
-1. Skapa en CSV-fil, till exempel `lista.csv`:
+Målgruppen är mindre organisationer och företag med anställda: föreningar, kliniker, byråer, restauranger, klubbar. Egenföretagare (kundtyp 1) får högst var tionde plats i kön. Fördelningen per kundtyp och förebilderna står i `prompts/kundprofil.md`; förfiltret (`prompts/forfilter.md`) ger pluspoäng för tecken på anställda (kansli, personalsida, namngivna roller, växelnummer, funktionsadresser) och väljer aldrig bort någon på grund av låg likhet med förebilderna. Segment skrivs i sessionen och läses in med `segment --fil`.
 
-   ```
-   url,namn,bransch,ort,kommentar
-   exempelforeningen.se,Exempelföreningen,idrottsförening,Uppsala,
-   https://www.annanforening.se/,,kulturförening,Västerås,tips från Anna
-   ```
+Alla träffar från discover sparas i tabellen `soktraffar` med var de hittades. Träffar som inte hann prövas prövas nästa gång innan någon ny sökning görs, i upp till 30 dagar.
 
-2. Läs in den:
+## Kvalificering
 
-   ```
-   npm run granskaren -- import lista.csv
-   ```
-
-3. Granska upp till tre sajter:
-
-   ```
-   npm run granskaren -- audit --antal 3
-   ```
-
-   För varje sajt hämtas startsidan, kontaktsidan, om oss, den viktigaste handlingssidan (bli medlem, boka, stöd oss, tjänster, priser), senaste nyhet och upp till tre menysidor, högst åtta sidor med minst två sekunders paus. robots.txt respekteras. Lighthouse (mobil) och axe körs på startsidan och handlingssidan. Egna kontroller körs på alla sidor. Sedan analyserar språkmodellen underlaget, varje fynd verifieras i ett separat steg, och en rapport skrivs.
-
-4. Läs rapporten:
-
-   ```
-   npm run granskaren -- report exempelforeningen.se
-   ```
-
-   Rapporten finns också som fil i `data/rapporter/<domän>.md` och går bra att öppna i VS Code med förhandsvisning, då syns skärmbilderna.
-
-5. Se läget:
-
-   ```
-   npm run granskaren -- status
-   ```
+En sajt hoppas över och markeras med orsak om domänen inte svarar, verkar parkerad eller under uppbyggnad, om kontakt- eller om-sidan visar att organisationen har egen kommunikationsfunktion, om domänen finns på spärrlistan eller redan har fått ett mejl. Hoppade sajter och orsaken syns i `status`.
 
 ## Vad som sparas
 
 | Plats | Innehåll |
 |---|---|
-| `data/granskaren.db` | SQLite-databasen med prospekt, sidor, mätningar, fynd, händelser, spärrlista och kostnader. |
-| `data/sidor/<domän>/` | Renderad HTML, ren text och skärmbilder (dator och mobil) för varje hämtad sida, samt robots.txt och sitemap.xml. |
+| `data/granskaren.db` | SQLite-databasen med prospekt, sidor, mätningar, fynd (med `galler_inte`), händelser, mejl, spärrlista, sökträffar och kostnader. |
+| `data/pass/<datum>/<domän>/` | Arbetspaket och resultatfiler för passet, med statusfil per steg. |
+| `data/sidor/<domän>/` | Renderad HTML, ren text och skärmbilder för varje hämtad sida, samt robots.txt och sitemap.xml. |
 | `data/lighthouse/<domän>/` | Fullständiga Lighthouse-rapporter som JSON. |
-| `data/underlag/<domän>.json` | Hela underlaget som modellen fick, inklusive alla mätvärden. Det är hit verifieringen går för att kontrollera belägg. |
-| `data/rapporter/<domän>.md` | Rapporten. |
+| `data/underlag/<domän>.json` | Hela underlaget med alla mätvärden. Det är hit verifieringen går för att kontrollera belägg. |
+| `data/rapporter/<domän>.md` | Rapporten, och `<domän>-fordjupning.md` efter en fördjupad analys. |
+| `data/utkast/<domän>.txt`, `data/skickade/` | Utkastet som fil och en kopia av varje skickat mejl. |
+| `data/logg/` | Loggar från utskick. |
+| `data/jamforelse/kvot-logg.csv` | Kvotförbrukning per pass. |
 
 ## Så kontrollerar du ett fynd för hand
 
@@ -139,21 +133,20 @@ Varje fynd i rapporten har ett belägg med URL, typ och värde.
 - `saknat_element`. Värdet är en CSS-selektor. Öppna sidans HTML i `data/sidor/<domän>/` och sök efter elementet. Det ska inte finnas.
 - `matvarde`. Värdet är `nyckel=värde`. Nyckeln finns i `data/underlag/<domän>.json` under sidan (`kontroll`, `lighthouse`, `axe`) eller under `sajt`.
 - `citat`. Värdet ska finnas ordagrant i sidans text, se `.txt`-filen i `data/sidor/<domän>/`.
-- `statuskod`. Statuskoden för URL:en, antingen en hämtad sida eller en kontrollerad länk (`lankar` i databasen).
-- `skarmbild`. Titta på skärmbilden som rapporten länkar till.
+- `statuskod`. Statuskoden för URL:en, antingen en hämtad sida eller en kontrollerad länk.
 
-Fynd om budskap, innehåll och vägen till handling (område A, C och H) kontrolleras dessutom av ett andra modellanrop som bara får rådata och fyndet. Bara fynd som bekräftas av alla tillämpliga kontroller markeras som verifierade. Övriga listas i rapporten under "Fynd som inte kunde bekräftas" med orsak.
+Fynd som inte bekräftades listas i rapporten under "Fynd som inte kunde bekräftas" med orsak.
 
-## Promptar
+## Promptar och agenter
 
 Alla promptar ligger i `prompts/` som markdown. Ändra ton och regler där utan att röra koden.
 
-- `prompts/analys.md` styr granskningen och vilka fynd modellen får föreslå.
-- `prompts/verifiering.md` styr det andra modellanropet som kontrollerar bedömningsfynd.
+- `prompts/analys.md` den lätta analysen, `prompts/analys-fordjupad.md` den fördjupade.
+- `prompts/verifiering.md` faktakontrollen med exempel på bekräftat, delvis och fel.
+- `prompts/mejl.md`, `prompts/grind.md`, `prompts/fler-fynd.md`, `prompts/forbjudna-fraser.md` mejlet.
+- `prompts/kundprofil.md`, `prompts/forfilter.md`, `prompts/segment.md`, `prompts/discover-webb.md` målgruppen.
 
-## Kvalificering
-
-En sajt hoppas över och markeras med orsak om domänen inte svarar, verkar parkerad eller under uppbyggnad, om kontakt- eller om-sidan visar att organisationen har egen kommunikationsfunktion (presskontakt, kommunikationschef och liknande), om domänen finns på spärrlistan eller redan har fått ett mejl. Hoppade sajter och orsaken syns i `status`.
+Underagenterna definieras i `.claude/agents/` med fullständiga modellnamn och bara verktygen Read och Write. Färdigheten `/dagens` i `.claude/skills/dagens/SKILL.md` är passledarens instruktion. Ändringar i agentdefinitionerna gäller från nästa session.
 
 ## Tester
 
@@ -163,49 +156,6 @@ npm test
 
 Testerna använder sparade HTML-sidor i `tests/fixtures/` och en databas i minnet. Inga tester anropar riktiga sajter eller modellen.
 
-## Kostnad
+## Kvot och kostnad
 
-Varje modellanrop loggas i tabellen `kostnader` med steg, modell, tokens och antal webbsökningar (webbsökning debiteras med 10 USD per 1 000 sökningar utöver tokens). Prislistan ligger i `src/analyze/klient.ts` och är hämtad från platform.claude.com/docs/en/about-claude/pricing. `status` visar total kostnad, kostnad per granskad sajt och månadens förbrukning mot taket.
-
-`MAX_KOSTNAD_PER_MANAD` i `.env` är ett tak i USD per kalendermånad enligt kostnadsloggen. När det nås kastas ett fel före nästa modellanrop och `run`, `audit`, `draft` och `discover` avbryter i stället för att försöka igen. `0` stänger av taket. Lägg dessutom ett kostnadstak på Anthropic-kontot, eftersom loggen bara ser det den här koden anropar.
-
-### Inställningar som sänker kostnaden
-
-Varje ändring styrs av en rad i `.env` och kan slås av utan kodändring. Standardvärdena ger samma beteende som innan inställningen fanns.
-
-| Inställning | Standard | Förslag | Vad den gör |
-|---|---|---|---|
-| `MODEL_ANALYS` | claude-opus-5-5 | claude-sonnet-5-5 | Modell för analys, utkast, segment och likhetsprofil |
-| `MODEL_DISCOVER` | samma som MODEL_ANALYS | claude-opus-5-5 | Modell för webbsökningen i discover |
-| `ANALYS_MAX_FYND` | 6 | 4 | Högsta antal fynd per sajt |
-| `ANALYS_KORT` | false | true | Slår ihop observation, insikt och rotorsak till ett fält på högst två meningar |
-| `UPPTRAPPNING` | false | true | Kör analysen om en gång på `MODEL_UPPTRAPPNING` när huvudinsikt saknas, inget bekräftat fynd har djup 3 eller färre än tre fynd bekräftas. Loggas som händelsen upptrappning |
-| `MODEL_UPPTRAPPNING` | claude-opus-5-5 | | Modellen upptrappningen använder |
-| `MEJL_ORDMAL` | 0 (promptens 160 till 200) | 190 | Ordmål för brödtexten som skickas med till modellen |
-| `MEJL_MAX_ORD` | 220 | 210 | Grindens övre ordgräns |
-| `MEJL_FLER_FYND` | false | true | En mening före erbjudandet om att Rawaz såg fler saker, bara när det finns bekräftade fynd utanför mejlet. Grinden stoppar mejl som påstår det utan sådana fynd |
-| `CACHE_TTL` | 5m | 1h | Livslängd på cachen för systemprompten |
-| `ANDRINGAR_FRAN` | tom | dagen ändringarna slogs på | Veckorapporten jämför tiden efter med Opus-perioden före, och kvalitetsvakten slås på |
-
-Verifieringen, kravet på belägg, grinden i övrigt och discover påverkas inte av inställningarna.
-
-### Uppföljning och kvalitetsvakt
-
-Med `ANDRINGAR_FRAN` satt visar `weekly` kostnad per skickat mejl uppdelat per steg, andel bekräftade fynd, andel sajter som trappades upp, andel utkast som grinden stoppade och svarsfrekvens, för Opus-perioden, tiden sedan ändringarna och de senaste sju dagarna.
-
-Varje gång `run` startar jämför kvalitetsvakten de senaste sju dagarna med Opus-perioden, om veckan har minst fem granskade sajter. Sjunker andelen bekräftade fynd mer än fem procentenheter, eller trappas mer än var tredje sajt upp, pausas ändringarna: driften går tillbaka till `MODEL_UPPTRAPPNING` med promptens standardomfång och Rawaz får ett mejl på avsändaradressen. `granskaren paus` visar läget och `granskaren paus --av` tar bort pausen.
-
-### Sparade sökträffar
-
-Alla träffar från en webbsökning i `discover` sparas i tabellen `soktraffar`. Träffar som inte hann prövas innan målet för dagen var nått prövas nästa gång innan någon ny sökning görs, i upp till 30 dagar. Ett segment som har sökts söks inte om inom samma tid.
-
-### Jämföra modeller
-
-`scripts/jamfor-modeller.ts` kör analys, verifiering och mejlutkast igen för redan granskade sajter med en annan modell, mot en kopia av databasen och med samma hämtade sidor som underlag. Inget skickas och driften påverkas inte. Resultatet med huvudinsikt, fynd, färdigt mejl och kostnad sida vid sida hamnar i `data/jamforelse/`.
-
-```
-npx tsx scripts/jamfor-modeller.ts --modell claude-sonnet-5-5 --sajter exempel.se,annan.se --discover 7 --segment --likhetsprofil
-npx tsx scripts/jamfor-modeller.ts --snabb claude-haiku-5-5 --verifiering exempel.se,annan.se
-```
-
-`--modell` byter analysmodellen (analys, utkast, discover, segment, likhetsprofil) och `--snabb` den snabba modellen (verifiering, förfilter, grind).
+Förbrukningen mäts i tokens per sajt och steg (`pass status`) och i andel av prenumerationens session och vecka (`pass kvot`). Snittet styr hur många sajter nästa pass tar. Kostnadsloggen i tabellen `kostnader` och taket `MAX_KOSTNAD_PER_MANAD` gäller bara API-vägen och står stilla i driften; `pass api-kontroll --sedan <rad>` är beviset på att inget API-anrop gjorts.
