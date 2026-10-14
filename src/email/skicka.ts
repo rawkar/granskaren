@@ -180,6 +180,18 @@ export function skickadeMejl(d: Db, doman?: string): SkickatMejl[] {
 export interface SandAlternativ {
   max?: number; // högsta antal att skicka i den här körningen
   pausMs?: () => number; // för tester
+  natpausMs?: number; // paus före nytt försök vid nätverksfel, för tester
+  skicka?: (d: Db, m: MejlRad) => Promise<"skickad" | "torrkord" | "stoppad">; // för tester
+}
+
+/** Fel som beror på nätet eller SMTP-servern för stunden, inte på mejlet. Sådana försöks igen efter en paus. */
+const TILLFALLIGA_FEL = new Set(["ENETUNREACH", "EHOSTUNREACH", "ENETDOWN", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "ESOCKET", "ETLS", "ECONNECTION"]);
+export const NATFORSOK = 4;
+export const NATPAUS_MS = 5 * 60 * 1000;
+
+export function arTillfalligtFel(e: unknown): boolean {
+  const kod = (e as { code?: string } | null)?.code;
+  return typeof kod === "string" && TILLFALLIGA_FEL.has(kod);
 }
 
 /** Skickar ett enskilt köat mejl, eller skriver det till torrkörning. Förutsätter att hinder() är kontrollerad. */
@@ -212,6 +224,22 @@ export function nastaKoade(d: Db): MejlRad | undefined {
   return d.prepare("SELECT * FROM mejl WHERE status = 'koad' ORDER BY id LIMIT 1").get() as MejlRad | undefined;
 }
 
+/**
+ * Kör ett försök att skicka och gör om det efter en paus när felet är tillfälligt (nätet nere, servern svarar inte).
+ * Mejlet ligger kvar som köat tills det faktiskt gått, så inget kan dubbleras. Efter NATFORSOK försök kastas felet vidare.
+ */
+export async function medNyaForsok<T>(forsok: () => Promise<T>, pausMs: number): Promise<T> {
+  for (let n = 1; ; n++) {
+    try {
+      return await forsok();
+    } catch (e) {
+      if (!arTillfalligtFel(e) || n >= NATFORSOK) throw e;
+      logg.varning(`   nätverksfel (${(e as { code?: string }).code}), försök ${n} av ${NATFORSOK}. Nytt försök om ${Math.round(pausMs / 60000)} minuter.`);
+      await paus(pausMs);
+    }
+  }
+}
+
 /** Skickar köade mejl inom tidsfönster och dagligt tak, med slumpad paus mellan. */
 export async function skickaKoade(d: Db, alt: SandAlternativ = {}): Promise<{ skickade: number; torrkorda: number; stoppade: number }> {
   const k = konfig();
@@ -239,7 +267,7 @@ export async function skickaKoade(d: Db, alt: SandAlternativ = {}): Promise<{ sk
       await paus(ms);
       if (hinder(d, k, m)) continue; // kontrollera igen efter pausen
     }
-    const utfall = await skickaEtt(d, m);
+    const utfall = await medNyaForsok(() => (alt.skicka ?? skickaEtt)(d, m), alt.natpausMs ?? NATPAUS_MS);
     if (utfall === "skickad") res.skickade++;
     else if (utfall === "torrkord") res.torrkorda++;
     else {

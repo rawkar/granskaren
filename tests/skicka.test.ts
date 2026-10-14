@@ -68,3 +68,37 @@ describe("tidsfönster och dagligt tak", () => {
     expect(nyttMessageId("x@a.se")).not.toBe(id);
   });
 });
+
+describe("nya försök vid nätverksfel", () => {
+  const natfel = (code: string) => Object.assign(new Error(code), { code });
+
+  it("känner igen tillfälliga fel men inte andra", async () => {
+    const { arTillfalligtFel } = await import("../src/email/skicka.js");
+    expect(arTillfalligtFel(natfel("ENETUNREACH"))).toBe(true);
+    expect(arTillfalligtFel(natfel("ECONNRESET"))).toBe(true);
+    expect(arTillfalligtFel(natfel("EAUTH"))).toBe(false);
+    expect(arTillfalligtFel(new Error("x"))).toBe(false);
+  });
+
+  it("försöker igen efter paus och lyckas när nätet är tillbaka", async () => {
+    const { medNyaForsok } = await import("../src/email/skicka.js");
+    let n = 0;
+    const r = await medNyaForsok(async () => {
+      n++;
+      if (n < 3) throw natfel("ENETUNREACH");
+      return "skickad";
+    }, 1);
+    expect(r).toBe("skickad");
+    expect(n).toBe(3);
+  });
+
+  it("ger upp efter NATFORSOK försök och kastar andra fel direkt", async () => {
+    const { medNyaForsok, NATFORSOK } = await import("../src/email/skicka.js");
+    let n = 0;
+    await expect(medNyaForsok(async () => { n++; throw natfel("ETIMEDOUT"); }, 1)).rejects.toMatchObject({ code: "ETIMEDOUT" });
+    expect(n).toBe(NATFORSOK);
+    n = 0;
+    await expect(medNyaForsok(async () => { n++; throw natfel("EAUTH"); }, 1)).rejects.toMatchObject({ code: "EAUTH" });
+    expect(n).toBe(1);
+  });
+});

@@ -48,7 +48,7 @@ npx tsx src/cli.ts review
 npx tsx src/cli.ts send
 ```
 
-`review --lista` skriver ut alla mejl i kön i sin helhet med id, mottagare och ämnesrad. `--godkann` köar, `--kasta` kastar (prospektet är kvar som granskat). Utan flaggor går `review` igenom kön interaktivt med möjlighet att redigera i textredigeraren. `send` skickar köade mejl på vardagar inom sändfönstret `SANDFONSTER_START` till `SANDFONSTER_SLUT`, högst `MAX_MEJL_PER_DAG` per dag, med en slumpad paus på `PAUS_MIN_MINUTER` till `PAUS_MAX_MINUTER` minuter mellan varje. `SAND_PAUSAD=true` stänger kön helt. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. Ingen schemalagd körning finns; utskicket startas när Rawaz säger det.
+`review --lista` skriver ut alla mejl i kön i sin helhet med id, mottagare och ämnesrad. `--godkann` köar, `--kasta` kastar (prospektet är kvar som granskat). Utan flaggor går `review` igenom kön interaktivt med möjlighet att redigera i textredigeraren. `send` skickar köade mejl på vardagar inom sändfönstret `SANDFONSTER_START` till `SANDFONSTER_SLUT`, högst `MAX_MEJL_PER_DAG` per dag, med en slumpad paus på `PAUS_MIN_MINUTER` till `PAUS_MAX_MINUTER` minuter mellan varje. Faller nätet mitt i väntar `send` fem minuter och försöker igen, upp till fyra gånger, innan det ger upp; mejlet ligger kvar som köat tills det har gått. `SAND_PAUSAD=true` stänger kön helt. Vid `TORRKORNING=true` skrivs mejlen som `.eml`-filer i `data/torrkorning/` i stället. Ingen schemalagd körning finns; utskicket startas när Rawaz säger det.
 
 Databasen tillåter bara ett förstamejl per domän, så ett utskick kan inte dubbleras.
 
