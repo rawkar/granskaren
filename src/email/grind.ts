@@ -47,15 +47,18 @@ const OMDOMEN = /som helst|intetsägande|allmän(t|na)? (rad|rubrik|formulering|
  * Språkregler som går att kontrollera med kod. Returnerar en lista med fel.
  * tilltal styr om du eller ni är det tillåtna tilltalet. Utelämnas det hoppas kontrollen över.
  */
-export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal, undantagsrader: string[] = [], maxOrd = MAX_ORD): string[] {
+export function sprakfel(amne: string, brodtext: string, bokningslank: string, tilltal?: Tilltal, undantagsrader: string[] = [], maxOrd = MAX_ORD, organisationsnamn: string | null = null): string[] {
   const fel: string[] = [];
   const hela = `${amne}\n${brodtext}`;
-  // Det konkreta förslaget är text för sajten, inte för mottagaren, och undantas från tilltals- och omdömeskontrollen
+  // Det konkreta förslaget är text för sajten, inte för mottagaren, och undantas från tilltals- och omdömeskontrollen.
+  // Detsamma gäller citat inom citattecken och organisationens namn: "Din Veterinär i Enköping" är inte ett du-tilltal.
   const undantag = new Set(undantagsrader.map((r) => normaliseraText(r)));
-  const egenText = brodtext
+  let egenText = brodtext
     .split(/\r?\n/)
     .filter((r) => !undantag.has(normaliseraText(r)))
-    .join("\n");
+    .join("\n")
+    .replace(/["”“][^"”“\n]{1,160}["”“]/g, " ");
+  if (organisationsnamn?.trim()) egenText = egenText.replace(new RegExp(organisationsnamn.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " ");
   if (/[–—]/.test(hela)) fel.push("innehåller tankstreck");
   if (/ - /.test(hela)) fel.push("innehåller bindestreck använt som tankstreck");
   if (/:/.test(amne)) fel.push("ämnesraden innehåller kolon");
@@ -327,7 +330,7 @@ export interface GrindAlternativ {
 export function grindKodfel(d: Db, p: Prospekt, utkast: { amne: string; brodtext: string }, fynd: FyndRad[], mottagare: string | null, alt: GrindAlternativ = {}): string[] {
   const k = konfig();
   const fel: string[] = [...(alt.extraFel ?? [])];
-  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD));
+  fel.push(...sprakfel(utkast.amne, utkast.brodtext, k.BOKNINGSLANK, alt.tilltal, fynd.map((f) => f.forslag_konkret).filter((x): x is string => !!x), k.MEJL_MAX_ORD || MAX_ORD, p.namn));
   fel.push(...tillaggsfel(utkast.brodtext, fynd, alt.flerFynd ?? null));
   fel.push(...tonfel(utkast.brodtext));
   fel.push(...huvudpoangfel(utkast.brodtext, fynd, alt.huvudfynd));

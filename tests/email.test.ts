@@ -190,3 +190,15 @@ describe("ämnesrad från mall", () => {
     expect(byggAmne("Tre idéer till {namn}", "exempel.se", null)).toBe("Tre idéer till exempel.se");
   });
 });
+
+describe("tilltalskontrollen och organisationens namn", () => {
+  const ni = "Hej,\n\nJag har gått igenom er webbplats. Högst upp står \"Välkommen till Din Veterinär i Enköping\" och Din Veterinär i Enköping tar emot hund och katt. Mer på rkkommunikation.se.";
+  it("räknar inte Din i ett citat eller i organisationens namn som du-tilltal", () => {
+    const fel = sprakfel("Några förslag", ni, "", "ni", [], 190, "Din Veterinär i Enköping");
+    expect(fel.filter((f) => /tilltalar/.test(f))).toEqual([]);
+  });
+  it("räknar fortfarande ett riktigt du-tilltal", () => {
+    const fel = sprakfel("Några förslag", `${ni} Du får gärna svara.`, "", "ni", [], 190, "Din Veterinär i Enköping");
+    expect(fel).toContain("tilltalar med du i stället för ni");
+  });
+});
