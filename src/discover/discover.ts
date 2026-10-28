@@ -10,6 +10,7 @@ import {
   SOKTRAFF_DAGAR,
   sparaSoktraffar,
 } from "../db/fragor.js";
+import { KandaDomaner } from "../db/kontaktade.js";
 import { logg, paus } from "../util/logg.js";
 import { forfiltrera, hamtaForForfilter } from "./forfilter.js";
 import { likhetsprofiler } from "./forebilder.js";
@@ -24,9 +25,9 @@ export interface DiscoverAlternativ {
   segmentId?: number;
 }
 
-/** Domäner som redan är kända: prospekt, kandidater, förebilder och spärrlista. */
+/** Domäner som redan är kända: prospekt, kandidater, förebilder, spärrlista och kontaktade.txt. */
 export function kandaDomaner(d: Db): Set<string> {
-  const s = new Set<string>();
+  const s = new KandaDomaner();
   for (const p of allaProspekt(d)) s.add(p.doman);
   for (const r of d.prepare("SELECT doman FROM kandidater").all() as { doman: string }[]) s.add(r.doman);
   for (const r of d.prepare("SELECT doman FROM likhetsprofil").all() as { doman: string }[]) s.add(r.doman);

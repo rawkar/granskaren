@@ -5,6 +5,7 @@ import nodemailer from "nodemailer";
 import { konfig, type Konfig } from "../config.js";
 import type { Db } from "../db/index.js";
 import { arSparrad, hamtaProspekt, loggaHandelse, sattStatus } from "../db/fragor.js";
+import { arKontaktad } from "../db/kontaktade.js";
 import { dataMapp, filnamnSaker } from "../util/fil.js";
 import { logg, paus } from "../util/logg.js";
 
@@ -77,6 +78,7 @@ export function hinder(d: Db, k: Konfig, m: MejlRad, nu = new Date()): string | 
   if (m.typ === "forsta") {
     const redan = d.prepare("SELECT 1 FROM mejl WHERE prospekt_id = ? AND typ = 'forsta' AND status = 'skickad' AND id != ?").get(m.prospekt_id, m.id);
     if (redan) return "domänen har redan fått ett förstamejl";
+    if (arKontaktad(p.doman)) return "domänen har fått mejl eller spärrats enligt kontaktade.txt";
   }
   if (!arVardag(nu)) return "inte en vardag";
   if (!inomFonster(nu, k.SANDFONSTER_START, k.SANDFONSTER_SLUT)) return `utanför sändfönstret ${k.SANDFONSTER_START} till ${k.SANDFONSTER_SLUT}`;

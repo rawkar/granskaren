@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import type { Db } from "../db/index.js";
 import { laggTillProspekt, loggaHandelse } from "../db/fragor.js";
+import { lasKontaktade, domanHash } from "../db/kontaktade.js";
 import { normaliseraDoman } from "../util/domain.js";
 
 export interface ImportRad {
@@ -88,13 +89,15 @@ export interface ImportResultat {
 export function importeraRader(d: Db, rader: ImportRad[], kalla = "lista"): ImportResultat {
   const res: ImportResultat = { tillagda: [], dubbletter: [], ogiltiga: [] };
   const sedda = new Set<string>();
+  const kontaktade = lasKontaktade();
   for (const rad of rader) {
     const doman = normaliseraDoman(rad.url);
     if (!doman) {
       res.ogiltiga.push(rad.url);
       continue;
     }
-    if (sedda.has(doman)) {
+    // En domän i kontaktade.txt har fått mejl eller spärrats, kanske från en annan dator
+    if (sedda.has(doman) || kontaktade.has(domanHash(doman))) {
       res.dubbletter.push(doman);
       continue;
     }

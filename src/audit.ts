@@ -20,6 +20,7 @@ import {
   uppdateraProspekt,
   type Prospekt,
 } from "./db/fragor.js";
+import { arKontaktad } from "./db/kontaktade.js";
 import { korAxe } from "./measure/axe.js";
 import { kontrolleraSajt, kontrolleraSida, type SidKontroll } from "./measure/kontroller.js";
 import { kontrolleraLankar } from "./measure/lankar.js";
@@ -66,6 +67,7 @@ export async function hamtaOchMat(d: Db, p: Prospekt, alt: AuditAlternativ = {})
 
   if (arSparrad(d, p.doman)) return hoppaMed(d, p, "spärrlista");
   if (harFattMejl(d, p.id)) return hoppaMed(d, p, "har redan fått mejl");
+  if (arKontaktad(p.doman)) return hoppaMed(d, p, "har fått mejl eller spärrats enligt kontaktade.txt");
 
   rensaGranskning(d, p.id);
 

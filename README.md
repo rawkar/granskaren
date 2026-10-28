@@ -52,6 +52,18 @@ npx tsx src/cli.ts send
 
 Databasen tillåter bara ett förstamejl per domän, så ett utskick kan inte dubbleras.
 
+## Flera datorer
+
+Databasen ligger i `data/` och följer inte med i git. För att en annan dator inte ska mejla samma organisation igen finns `kontaktade.txt` i repot: varje domän som har fått ett förstamejl eller spärrats, som SHA-256 av domänen (repot är publikt). `send`, `run` och `block` lägger till nya domäner, och `kontaktade` gör det för hand. Discover, `import`, förberedelsen och `send` hoppar över domäner i filen.
+
+```
+git pull                                   # innan varje pass
+npx tsx src/cli.ts kontaktade              # lägger databasens domäner till filen
+git add kontaktade.txt && git commit -m "kontaktade.txt efter utskicket" && git push   # efter varje utskick
+```
+
+Filen skyddar bara mot nya förstamejl. Uppföljningar, svar, studsar, segment, kvotlogg och prospekt med status ny finns bara i databasen. Ska de följa med till en ny dator kopierar man hela `data/` dit, med inget `send` igång.
+
 ## Kommandon
 
 Kör med `npx tsx src/cli.ts <kommando>` eller `npm run granskaren -- <kommando>`.
@@ -76,6 +88,7 @@ Kör med `npx tsx src/cli.ts <kommando>` eller `npm run granskaren -- <kommando>
 | `report <domän>` | Skriver ut rapporten för en sajt. |
 | `status` | Prospekt per status, mätpunkter, kostnad och tokens. |
 | `block <domän eller adress>` | Lägger till på spärrlistan. |
+| `kontaktade` | Lägger domäner som fått mejl eller spärrats till `kontaktade.txt`. |
 | `paus [--av]` | Visar eller tar bort kvalitetsvaktens paus. |
 
 Kommandona `audit`, `draft`, `discover`, `segment --antal` och `run` är API-vägen från den tidigare driften. De finns kvar för ett medvetet undantag men vägrar köra så länge `TILLAT_API=false`.
@@ -110,7 +123,7 @@ Alla träffar från discover sparas i tabellen `soktraffar` med var de hittades.
 
 ## Kvalificering
 
-En sajt hoppas över och markeras med orsak om domänen inte svarar, verkar parkerad eller under uppbyggnad, om kontakt- eller om-sidan visar att organisationen har egen kommunikationsfunktion, om domänen finns på spärrlistan eller redan har fått ett mejl. Hoppade sajter och orsaken syns i `status`.
+En sajt hoppas över och markeras med orsak om domänen inte svarar, verkar parkerad eller under uppbyggnad, om kontakt- eller om-sidan visar att organisationen har egen kommunikationsfunktion, om domänen finns på spärrlistan eller redan har fått ett mejl, här eller enligt `kontaktade.txt`. Hoppade sajter och orsaken syns i `status`.
 
 ## Vad som sparas
 

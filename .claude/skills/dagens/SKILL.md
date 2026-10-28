@@ -39,8 +39,9 @@ Driften går bara via sessionen: TILLAT_API=false i .env gör att API-klienten v
    | under 20 procent | kör inte, säg när gränsen återställs |
 
 2. Kontrollera `.env`: `TILLAT_API=false` och `SANDLAGE=granska` (alla mejl hamnar i granskningskön). Är något av dem fel, stanna och säg det till Rawaz. Kontrollera också att inget `run` pågår: `data/run.lock` ska peka på en död process eller saknas.
-3. Kör `npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
-4. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
+3. Kör `git pull` så att `kontaktade.txt` har med domäner som fått mejl från en annan dator. Domäner i filen hoppas över i discover, förberedelsen och utskicket.
+4. Kör `npx tsx src/cli.ts pass api-kontroll` och spara numret på senaste kostnadsrad. Det används efteråt som bevis på att inget API-anrop gjordes.
+5. Kör `pass status`. Finns ett pass för i dag med sajter som inte är klara, fortsätt med dem från det steg statusen visar (avsnitt 2). Ett avbrutet pass återupptas så, utan att något görs om.
 
 ## 1. Förbered
 
@@ -98,6 +99,7 @@ Inget skickas i passet. Med `SANDLAGE=granska` hamnar alla mejl i granskningskö
 1. `npx tsx src/cli.ts review --lista` skriver ut varje mejl i sin helhet med id, mottagare och ämnesrad. Visa dem för Rawaz som de är och fråga för vart och ett om det ska godkännas, ändras eller kastas. Det här är det enda tillfället då du läser mejltext.
 2. `npx tsx src/cli.ts review --godkann <id...> --orsak "godkänt av Rawaz <datum>"` köar de godkända. `review --kasta <id...> --orsak "<varför>"` kastar. Ett mejl som ska ändras skrivs om i databasen enligt Rawaz anvisning och visas igen innan det godkänns.
 3. `npx tsx src/cli.ts send` skickar de köade mejlen med slumpad paus (PAUS_MIN_MINUTER till PAUS_MAX_MINUTER) inom sändfönstret, högst MAX_MEJL_PER_DAG per dag. Kör det i bakgrunden med loggen till `data/logg/send-<datum>.log` och rapportera när det är klart. Utskicket startas bara när Rawaz säger det.
+4. När `send` är klart har det lagt de nya domänerna till `kontaktade.txt`. Committa och pusha filen direkt: `git add kontaktade.txt`, `git commit -m "kontaktade.txt efter utskicket <datum>"`, `git push`. Annars kan en annan dator mejla samma organisationer igen.
 
 `SAND_PAUSAD=true` stänger kön helt; då ligger köade mejl kvar tills Rawaz sätter false.
 

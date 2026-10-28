@@ -3,7 +3,8 @@ import { Command } from "commander";
 import { KostnadstakError, kostnadstak } from "./analyze/klient.js";
 import { granskaProspekt } from "./audit.js";
 import { konfig } from "./config.js";
-import { db } from "./db/index.js";
+import { db, type Db } from "./db/index.js";
+import { uppdateraKontaktade } from "./db/kontaktade.js";
 import { allaProspekt, hamtaProspektViaDoman, kostnadDennaManad, laggTillSparr, loggaHandelse, prospektMedStatus, sattStatus } from "./db/fragor.js";
 import { importeraFil } from "./discover/import.js";
 import { rapportSokvag } from "./report/rapport.js";
@@ -283,6 +284,7 @@ program
     }
     const r = await skickaKoade(d, { max: o.max ? Number.parseInt(o.max, 10) : undefined });
     logg.info(`Klart. Skickade: ${r.skickade}, torrkörda: ${r.torrkorda}, stoppade: ${r.stoppade}`);
+    skrivKontaktade(d);
   });
 
 program
@@ -292,7 +294,12 @@ program
   .option("--utan-discover", "leta inte nya prospekt", false)
   .action(async (o: { enGang: boolean; utanDiscover: boolean }) => {
     konfig();
-    await run(db(), { enGang: o.enGang, utanDiscover: o.utanDiscover });
+    const d = db();
+    try {
+      await run(d, { enGang: o.enGang, utanDiscover: o.utanDiscover });
+    } finally {
+      skrivKontaktade(d);
+    }
   });
 
 // ---------- pass: dagens körning i etapper utan API ----------
@@ -619,7 +626,25 @@ program
       loggaHandelse(d, p.id, "sparrad", o.orsak);
     }
     logg.info(ny ? `${v} tillagd på spärrlistan.` : `${v} fanns redan på spärrlistan.`);
+    skrivKontaktade(d);
   });
+
+program
+  .command("kontaktade")
+  .description("Lägger domäner som fått mejl eller spärrats till kontaktade.txt, som delas mellan datorer via git")
+  .action(() => {
+    skrivKontaktade(db());
+  });
+
+/** Uppdaterar kontaktade.txt och påminner om att pusha den när något nytt har lagts till. */
+function skrivKontaktade(d: Db): void {
+  const r = uppdateraKontaktade(d);
+  logg.info(
+    r.nya > 0
+      ? `kontaktade.txt: ${r.nya} nya, ${r.totalt} totalt. Committa och pusha filen så att andra datorer ser dem.`
+      : `kontaktade.txt: inget nytt, ${r.totalt} totalt.`,
+  );
+}
 
 program
   .command("status")
